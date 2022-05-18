@@ -4,7 +4,7 @@ import "time"
 
 const (
 	MinMessageSize  = 1 << 10
-	MaxMessageSize  = 1 << 24
+	MaxMessageSize  = 1 << 20
 	MeasureInterval = 250 * time.Millisecond
 	ScalingFraction = 16
 )

@@ -64,7 +64,7 @@ func HandleUpload(ctx context.Context, conn *websocket.Conn) error {
 		total += int64(n)
 		select {
 		case <-ticker.C:
-			emitAppInfo(start, total, "download")
+			emitAppInfo(start, total, "upload")
 		default:
 			// NOTHING
 		}
@@ -92,7 +92,7 @@ func HandleDownload(ctx context.Context, conn *websocket.Conn) error {
 		total += int64(size)
 		select {
 		case <-ticker.C:
-			emitAppInfo(start, total, "upload")
+			emitAppInfo(start, total, "download")
 		default:
 			// NOTHING
 		}
