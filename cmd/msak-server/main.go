@@ -47,7 +47,7 @@ func main() {
 					case <-r.Context().Done():
 						return
 					case rate := <-rates:
-						fmt.Println(rate)
+						fmt.Printf("Download rate: %v\n", rate)
 					}
 				}
 			}()
@@ -65,8 +65,10 @@ func main() {
 					select {
 					case <-r.Context().Done():
 						return
-					case rate := <-rates:
-						fmt.Println(rate)
+					case rate, ok := <-rates:
+						if ok {
+							fmt.Printf("Upload rate: %v\n", rate)
+						}
 					}
 				}
 			}()

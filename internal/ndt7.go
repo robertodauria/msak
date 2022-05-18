@@ -68,7 +68,6 @@ func Receiver(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.C
 				return err
 			}
 			appInfo.NumBytes += int64(len(data))
-			fmt.Printf("%s\n", string(data))
 			continue
 		}
 		n, err := io.Copy(ioutil.Discard, reader)
@@ -83,6 +82,7 @@ func Receiver(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.C
 			// Send counterflow message
 			conn.WriteJSON(Measurement{AppInfo: appInfo})
 			// Send measurement back to the caller
+			fmt.Println(appInfo)
 			rates <- BitsPerSecond(float64(appInfo.NumBytes) * 8 / float64(appInfo.ElapsedTime))
 
 		default:
@@ -99,7 +99,11 @@ func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- BitsPe
 	for ctx.Err() == nil {
 		mtype, mdata, err := conn.ReadMessage()
 		if err != nil {
-			errCh <- err
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				fmt.Println("unexpected error")
+				errCh <- err
+			}
+			close(errCh)
 			return
 		}
 		if mtype != websocket.TextMessage {
@@ -118,6 +122,7 @@ func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- BitsPe
 }
 
 func Sender(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.Conn, bbr bool) error {
+	defer close(rates)
 	if bbr {
 		ci := netx.ToConnInfo(conn.UnderlyingConn())
 		err := ci.EnableBBR()
@@ -159,6 +164,8 @@ func Sender(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.Con
 			return err
 		}
 	}
+
+	conn.Close()
 
 	// Read any errors from the readcounterflow goroutine.
 	err = <-errch
