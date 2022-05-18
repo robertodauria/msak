@@ -16,12 +16,11 @@ import (
 
 // TODO: implement wss :)
 const protocol = "ws"
+const maxStreams = 10
 
 var (
-	flagServer   = flag.String("server", "localhost:8080", "Server address")
-	flagDownload = flag.Bool("download", false, "Download URL")
-	flagUpload   = flag.Bool("upload", false, "Upload URL")
-	flagStreams  = flag.Int("streams", 1, "Number of streams")
+	flagServer  = flag.String("server", "localhost:8080", "Server address")
+	flagStreams = flag.Int("streams", 0, "Number of streams")
 )
 
 func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
@@ -38,43 +37,84 @@ func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 
 func main() {
 	flag.Parse()
-	// downloadURL := protocol + "://" + *flagServer + internal.DownloadPath
-	uploadURL := protocol + "://" + *flagServer + internal.UploadPath
 
-	// previousRate := 0.0
-	streams := 5
+	if *flagStreams != 0 {
+		// Single run with custom number of streams
+		downloadAggrRate := multi(internal.Download, *flagStreams)
+		uploadAggrRate := multi(internal.Upload, *flagStreams)
+		fmt.Printf("Download: %f\n", downloadAggrRate)
+		fmt.Printf("Upload: %f\n", uploadAggrRate)
+		return
+	}
+
+	rates := []float64{}
+	streams := 1
+	previousRate := 0.0
+	for streams <= maxStreams {
+		rate := multi(internal.Download, streams)
+		fmt.Printf("Aggregated rate (%d streams): %f\n", streams, rate)
+		rates = append(rates, rate)
+
+		if rate <= previousRate*1.05 {
+			break
+		}
+		streams++
+		previousRate = rate
+	}
+
+	fmt.Println("Aggregated rate by number of streams")
+	for i, rate := range rates {
+		fmt.Printf("\t%d: %f\n", i+1, rate)
+	}
+}
+
+func multi(test internal.Test, streams int) float64 {
+	uploadURL := protocol + "://" + *flagServer + internal.UploadPath
+	downloadURL := protocol + "://" + *flagServer + internal.DownloadPath
+
 	wg := sync.WaitGroup{}
+
 	// Start N streams and let them run for 5 seconds.
 	timeout, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	allRates := map[int]internal.BitsPerSecond{}
+	rates := map[int]internal.BitsPerSecond{}
+	ratesMutex := sync.Mutex{}
 	for i := 0; i < streams; i++ {
 		wg.Add(1)
-		rates := make(chan internal.BitsPerSecond)
+		ratesCh := make(chan internal.BitsPerSecond)
 		// Read from the rates channel and store rates in the map.
 		idx := i
 		go func() {
-			for rate := range rates {
-				allRates[idx] = rate
+			for rate := range ratesCh {
+				ratesMutex.Lock()
+				rates[idx] = rate
+				ratesMutex.Unlock()
 			}
 		}()
-		go upload(&wg, timeout, rates, uploadURL)
+		switch test {
+		case internal.Upload:
+			go upload(&wg, timeout, ratesCh, uploadURL)
+		case internal.Download:
+			go download(&wg, timeout, ratesCh, downloadURL)
+		default:
+			panic("invalid test type")
+		}
+
 	}
 	wg.Wait()
 	fmt.Printf("Completed (%d streams):\n", streams)
 	fmt.Println("Rates:")
-	for i, rate := range allRates {
+	for i, rate := range rates {
 		fmt.Printf("\t%d: %f\n", i, rate)
 	}
 	sum := 0.0
-	for _, bps := range allRates {
+	for _, bps := range rates {
 		sum += float64(bps)
 	}
-	fmt.Printf("Aggregated rate: %v\n", sum)
+	return sum
 }
 
-func download(wg *sync.WaitGroup, ctx context.Context, rate <-chan internal.BitsPerSecond, url string) {
+func download(wg *sync.WaitGroup, ctx context.Context, rates chan internal.BitsPerSecond, url string) {
 	defer wg.Done()
-	fmt.Println("Started download stream")
 	var (
 		conn *websocket.Conn
 		err  error
@@ -82,7 +122,6 @@ func download(wg *sync.WaitGroup, ctx context.Context, rate <-chan internal.Bits
 	if conn, err = dialer(ctx, url); err != nil {
 		rtx.Must(err, "download dialer")
 	}
-	rates := make(chan internal.BitsPerSecond)
 	if err := internal.Receiver(ctx, rates, conn); err != nil {
 		rtx.Must(err, "download")
 	}
@@ -90,7 +129,6 @@ func download(wg *sync.WaitGroup, ctx context.Context, rate <-chan internal.Bits
 
 func upload(wg *sync.WaitGroup, ctx context.Context, rates chan internal.BitsPerSecond, url string) {
 	defer wg.Done()
-	fmt.Println("Started upload stream")
 	var (
 		conn *websocket.Conn
 		err  error

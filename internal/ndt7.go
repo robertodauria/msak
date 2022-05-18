@@ -78,11 +78,10 @@ func Receiver(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.C
 		select {
 		case <-ticker.C:
 			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
-			emitAppInfo(&appInfo, "upload")
+			// emitAppInfo(&appInfo, "upload")
 			// Send counterflow message
 			conn.WriteJSON(Measurement{AppInfo: appInfo})
 			// Send measurement back to the caller
-			fmt.Println(appInfo)
 			rates <- BitsPerSecond(float64(appInfo.NumBytes) * 8 / float64(appInfo.ElapsedTime))
 
 		default:
@@ -150,7 +149,7 @@ func Sender(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.Con
 		select {
 		case <-ticker.C:
 			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
-			emitAppInfo(&appInfo, "download")
+			// emitAppInfo(&appInfo, "download")
 			// Send measurement message
 			conn.WriteJSON(Measurement{AppInfo: appInfo})
 		default:

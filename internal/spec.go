@@ -11,3 +11,10 @@ const (
 	DownloadPath = "/ndt/v7/download"
 	UploadPath   = "/ndt/v7/upload"
 )
+
+type Test uint8
+
+const (
+	Download Test = iota
+	Upload
+)
