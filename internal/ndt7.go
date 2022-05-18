@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/m-lab/go/rtx"
+	"github.com/m-lab/ndt-server/netx"
 )
 
 func makePreparedMessage(size int) (*websocket.PreparedMessage, error) {
@@ -73,6 +75,9 @@ func HandleUpload(ctx context.Context, conn *websocket.Conn) error {
 }
 
 func HandleDownload(ctx context.Context, conn *websocket.Conn) error {
+	ci := netx.ToConnInfo(conn.UnderlyingConn())
+	err := ci.EnableBBR()
+	rtx.Must(err, "cannot enable BBR", err)
 	var total int64
 	start := time.Now()
 	if err := conn.SetWriteDeadline(time.Now().Add(DefaultReadDeadline)); err != nil {
