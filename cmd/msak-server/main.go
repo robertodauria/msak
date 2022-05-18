@@ -40,14 +40,40 @@ func main() {
 	ndt7Mux := http.NewServeMux()
 	ndt7Mux.Handle(spec.DownloadURLPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if conn, err := internal.Upgrade(w, r); err == nil {
-			err := internal.Sender(r.Context(), conn, true)
-			fmt.Println(err)
+			rates := make(chan internal.BitsPerSecond)
+			go func() {
+				for {
+					select {
+					case <-r.Context().Done():
+						return
+					case rate := <-rates:
+						fmt.Println(rate)
+					}
+				}
+			}()
+			err := internal.Sender(r.Context(), rates, conn, true)
+			if err != nil {
+				fmt.Println(err)
+			}
 		}
 	}))
 	ndt7Mux.Handle(spec.UploadURLPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if conn, err := internal.Upgrade(w, r); err == nil {
-			err := internal.Receiver(r.Context(), conn)
-			fmt.Println(err)
+			rates := make(chan internal.BitsPerSecond)
+			go func() {
+				for {
+					select {
+					case <-r.Context().Done():
+						return
+					case rate := <-rates:
+						fmt.Println(rate)
+					}
+				}
+			}()
+			err := internal.Receiver(r.Context(), rates, conn)
+			if err != nil {
+				fmt.Println(err)
+			}
 		}
 	}))
 
