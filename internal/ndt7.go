@@ -39,9 +39,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 func HandleUpload(ctx context.Context, conn *websocket.Conn) error {
 	var total int64
 	start := time.Now()
-	if err := conn.SetReadDeadline(start.Add(DefaultReadDeadline)); err != nil {
-		return err
-	}
+
 	conn.SetReadLimit(MaxMessageSize)
 	ticker := time.NewTicker(MeasureInterval)
 	defer ticker.Stop()
@@ -80,9 +78,6 @@ func HandleDownload(ctx context.Context, conn *websocket.Conn) error {
 	rtx.Must(err, "cannot enable BBR", err)
 	var total int64
 	start := time.Now()
-	if err := conn.SetWriteDeadline(time.Now().Add(DefaultReadDeadline)); err != nil {
-		return err
-	}
 	size := MinMessageSize
 	message, err := makePreparedMessage(size)
 	if err != nil {
