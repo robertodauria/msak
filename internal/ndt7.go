@@ -35,8 +35,8 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	return u.Upgrade(w, r, h)
 }
 
-// HandleUpload handles an upload measurement over the given websocket.Conn.
-func HandleUpload(ctx context.Context, conn *websocket.Conn) error {
+// Receiver handles an upload measurement over the given websocket.Conn.
+func Receiver(ctx context.Context, conn *websocket.Conn) error {
 	var total int64
 	start := time.Now()
 
@@ -72,10 +72,12 @@ func HandleUpload(ctx context.Context, conn *websocket.Conn) error {
 	return nil
 }
 
-func HandleDownload(ctx context.Context, conn *websocket.Conn) error {
-	ci := netx.ToConnInfo(conn.UnderlyingConn())
-	err := ci.EnableBBR()
-	rtx.Must(err, "cannot enable BBR", err)
+func Sender(ctx context.Context, conn *websocket.Conn, bbr bool) error {
+	if bbr {
+		ci := netx.ToConnInfo(conn.UnderlyingConn())
+		err := ci.EnableBBR()
+		rtx.Must(err, "cannot enable BBR", err)
+	}
 	var total int64
 	start := time.Now()
 	size := MinMessageSize

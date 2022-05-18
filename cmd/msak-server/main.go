@@ -40,13 +40,13 @@ func main() {
 	ndt7Mux := http.NewServeMux()
 	ndt7Mux.Handle(spec.DownloadURLPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if conn, err := internal.Upgrade(w, r); err == nil {
-			err := internal.HandleDownload(r.Context(), conn)
+			err := internal.Sender(r.Context(), conn, true)
 			fmt.Println(err)
 		}
 	}))
 	ndt7Mux.Handle(spec.UploadURLPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if conn, err := internal.Upgrade(w, r); err == nil {
-			err := internal.HandleUpload(r.Context(), conn)
+			err := internal.Receiver(r.Context(), conn)
 			fmt.Println(err)
 		}
 	}))
