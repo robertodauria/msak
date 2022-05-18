@@ -17,7 +17,7 @@ import (
 
 var errNonTextMessage = errors.New("not a text message")
 
-type BitsPerSecond float64
+type Rate float64
 
 type AppInfo struct {
 	NumBytes    int64
@@ -50,7 +50,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 }
 
 // Receiver handles an upload measurement over the given websocket.Conn.
-func Receiver(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.Conn) error {
+func Receiver(ctx context.Context, rates chan<- Rate, conn *websocket.Conn) error {
 	defer close(rates)
 	appInfo := AppInfo{}
 	start := time.Now()
@@ -82,7 +82,7 @@ func Receiver(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.C
 			// Send counterflow message
 			conn.WriteJSON(Measurement{AppInfo: appInfo})
 			// Send measurement back to the caller
-			rates <- BitsPerSecond(float64(appInfo.NumBytes) * 8 / float64(appInfo.ElapsedTime))
+			rates <- Rate(float64(appInfo.NumBytes) * 8 / float64(appInfo.ElapsedTime))
 
 		default:
 			// NOTHING
@@ -93,7 +93,7 @@ func Receiver(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.C
 
 // readcounterflow reads counter flow message and reports rates.
 // Errors are reported via errCh.
-func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- BitsPerSecond, errCh chan<- error) {
+func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- Rate, errCh chan<- error) {
 	conn.SetReadLimit(MaxMessageSize)
 	for ctx.Err() == nil {
 		mtype, mdata, err := conn.ReadMessage()
@@ -114,13 +114,13 @@ func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- BitsPe
 			errCh <- err
 			return
 		}
-		ch <- BitsPerSecond(float64(m.AppInfo.NumBytes) * 8 / float64(m.AppInfo.ElapsedTime))
+		ch <- Rate(float64(m.AppInfo.NumBytes) * 8 / float64(m.AppInfo.ElapsedTime))
 	}
 	// Signal we've finished reading counterflow messages.
 	errCh <- nil
 }
 
-func Sender(ctx context.Context, rates chan<- BitsPerSecond, conn *websocket.Conn, bbr bool) error {
+func Sender(ctx context.Context, rates chan<- Rate, conn *websocket.Conn, bbr bool) error {
 	defer close(rates)
 	if bbr {
 		ci := netx.ToConnInfo(conn.UnderlyingConn())

@@ -40,7 +40,7 @@ func main() {
 	ndt7Mux := http.NewServeMux()
 	ndt7Mux.Handle(spec.DownloadURLPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if conn, err := internal.Upgrade(w, r); err == nil {
-			rates := make(chan internal.BitsPerSecond)
+			rates := make(chan internal.Rate)
 			go func() {
 				for {
 					select {
@@ -59,7 +59,7 @@ func main() {
 	}))
 	ndt7Mux.Handle(spec.UploadURLPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if conn, err := internal.Upgrade(w, r); err == nil {
-			rates := make(chan internal.BitsPerSecond)
+			rates := make(chan internal.Rate)
 			go func() {
 				for {
 					select {

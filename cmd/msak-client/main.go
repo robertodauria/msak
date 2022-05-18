@@ -76,11 +76,11 @@ func multi(test internal.Test, streams int) float64 {
 
 	// Start N streams and let them run for 5 seconds.
 	timeout, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	rates := map[int]internal.BitsPerSecond{}
+	rates := map[int]internal.Rate{}
 	ratesMutex := sync.Mutex{}
 	for i := 0; i < streams; i++ {
 		wg.Add(1)
-		ratesCh := make(chan internal.BitsPerSecond)
+		ratesCh := make(chan internal.Rate)
 		// Read from the rates channel and store rates in the map.
 		idx := i
 		go func() {
@@ -113,7 +113,7 @@ func multi(test internal.Test, streams int) float64 {
 	return sum
 }
 
-func download(wg *sync.WaitGroup, ctx context.Context, rates chan internal.BitsPerSecond, url string) {
+func download(wg *sync.WaitGroup, ctx context.Context, rates chan internal.Rate, url string) {
 	defer wg.Done()
 	var (
 		conn *websocket.Conn
@@ -127,7 +127,7 @@ func download(wg *sync.WaitGroup, ctx context.Context, rates chan internal.BitsP
 	}
 }
 
-func upload(wg *sync.WaitGroup, ctx context.Context, rates chan internal.BitsPerSecond, url string) {
+func upload(wg *sync.WaitGroup, ctx context.Context, rates chan internal.Rate, url string) {
 	defer wg.Done()
 	var (
 		conn *websocket.Conn
