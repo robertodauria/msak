@@ -7,7 +7,7 @@ import (
 	"net/http"
 
 	"github.com/m-lab/go/rtx"
-	"github.com/m-lab/msak/internal"
+	"github.com/robertodauria/msak/internal"
 )
 
 var flagEndpointCleartext = flag.String("listen", ":8080", "Listen address/port for cleartext connections")

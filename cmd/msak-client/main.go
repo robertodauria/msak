@@ -11,7 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/go/rtx"
-	"github.com/m-lab/msak/internal"
+	"github.com/robertodauria/msak/internal"
 )
 
 // TODO: implement wss :)
