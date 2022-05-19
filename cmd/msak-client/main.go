@@ -21,6 +21,7 @@ const maxStreams = 10
 var (
 	flagServer  = flag.String("server", "localhost:8080", "Server address")
 	flagStreams = flag.Int("streams", 0, "Number of streams")
+	flagCC      = flag.String("cc", "default", "Congestion control algorithm to use")
 )
 
 func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
@@ -31,6 +32,11 @@ func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 	}
 	headers := http.Header{}
 	headers.Add("Sec-WebSocket-Protocol", "net.measurementlab.ndt.v7")
+	// Request custom CC from the server. Note: the server may just hang if
+	// the requested CC does not exist.
+	if *flagCC != "default" {
+		headers.Add("cc", *flagCC)
+	}
 	conn, _, err := dialer.DialContext(ctx, URL, headers)
 	return conn, err
 }
@@ -134,7 +140,7 @@ func upload(wg *sync.WaitGroup, ctx context.Context, rates chan internal.Rate, u
 	if conn, err = dialer(ctx, url); err != nil {
 		rtx.Must(err, "upload dialer")
 	}
-	if err = internal.Sender(ctx, conn, rates, false); err != nil {
+	if err = internal.Sender(ctx, conn, rates, *flagCC); err != nil {
 		rtx.Must(err, "upload")
 	}
 }

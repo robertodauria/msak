@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/m-lab/go/rtx"
-	"github.com/m-lab/ndt-server/netx"
 )
 
 var errNonTextMessage = errors.New("not a text message")
@@ -142,11 +140,11 @@ func readcounterflow(conn *websocket.Conn, ch chan<- Rate, errCh chan<- error) {
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
-func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, enableBBR bool) error {
+func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, cc string) error {
 	errch := make(chan error, 2)
 	defer close(rates)
 	defer conn.Close()
-	go sender(conn, rates, errch, enableBBR)
+	go sender(conn, rates, errch, cc)
 	select {
 	case <-ctx.Done():
 		return nil
@@ -158,11 +156,14 @@ func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, enable
 	}
 }
 
-func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, enableBBR bool) {
-	if enableBBR {
-		ci := netx.ToConnInfo(conn.UnderlyingConn())
-		err := ci.EnableBBR()
-		rtx.Must(err, "cannot enable BBR", err)
+func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc string) {
+	if cc != "default" {
+		fmt.Printf("setting cc %s\n", cc)
+		err := SetCC(conn, cc)
+		if err != nil {
+			errch <- err
+			return
+		}
 	}
 
 	appInfo := AppInfo{}
