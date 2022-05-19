@@ -80,7 +80,7 @@ func multi(test internal.Test, streams int) float64 {
 	for i := 0; i < streams; i++ {
 		wg.Add(2)
 		ratesCh := make(chan internal.Rate)
-		// Read from the rates channel and store rates in the map.
+		// Read from the rates channel and store rates in the slice.
 		idx := i
 		go func() {
 			defer wg.Done()
@@ -134,7 +134,7 @@ func upload(wg *sync.WaitGroup, ctx context.Context, rates chan internal.Rate, u
 	if conn, err = dialer(ctx, url); err != nil {
 		rtx.Must(err, "upload dialer")
 	}
-	if err = internal.Sender(ctx, rates, conn, false); err != nil {
+	if err = internal.Sender(ctx, conn, rates, false); err != nil {
 		rtx.Must(err, "upload")
 	}
 }

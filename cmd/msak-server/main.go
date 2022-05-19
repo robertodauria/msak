@@ -53,7 +53,7 @@ func main() {
 					}
 				}
 			}()
-			err := internal.Sender(r.Context(), rates, conn, true)
+			err := internal.Sender(r.Context(), conn, rates, true)
 			if err != nil {
 				fmt.Println(err)
 			}

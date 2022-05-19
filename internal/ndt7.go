@@ -49,30 +49,50 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	return u.Upgrade(w, r, h)
 }
 
-// Receiver handles an upload measurement over the given websocket.Conn.
+// Receiver receives data over the provided websocket.Conn.
+//
+// The computed rate is sent to the rates channel.
+//
+// The context drives how long the connection lasts. If the context is canceled
+// or there is an error, the connection and the rates channel are closed.
 func Receiver(ctx context.Context, rates chan<- Rate, conn *websocket.Conn) error {
+	errch := make(chan error, 1)
 	defer close(rates)
+	defer conn.Close()
+	go receiver(conn, rates, errch)
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errch:
+		return err
+	}
+}
+
+func receiver(conn *websocket.Conn, rates chan<- Rate, errch chan<- error) {
 	appInfo := AppInfo{}
 	start := time.Now()
 	conn.SetReadLimit(MaxMessageSize)
 	ticker := time.NewTicker(MeasureInterval)
 	defer ticker.Stop()
-	for ctx.Err() == nil {
+	for {
 		kind, reader, err := conn.NextReader()
 		if err != nil {
-			return err
+			errch <- err
+			return
 		}
 		if kind == websocket.TextMessage {
 			data, err := ioutil.ReadAll(reader)
 			if err != nil {
-				return err
+				errch <- err
+				return
 			}
 			appInfo.NumBytes += int64(len(data))
 			continue
 		}
 		n, err := io.Copy(ioutil.Discard, reader)
 		if err != nil {
-			return err
+			errch <- err
+			return
 		}
 		appInfo.NumBytes += int64(n)
 		select {
@@ -83,26 +103,20 @@ func Receiver(ctx context.Context, rates chan<- Rate, conn *websocket.Conn) erro
 			conn.WriteJSON(Measurement{AppInfo: appInfo})
 			// Send measurement back to the caller
 			rates <- Rate(float64(appInfo.NumBytes) * 8 / float64(appInfo.ElapsedTime))
-
 		default:
 			// NOTHING
 		}
 	}
-	return nil
 }
 
 // readcounterflow reads counter flow message and reports rates.
 // Errors are reported via errCh.
-func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- Rate, errCh chan<- error) {
+func readcounterflow(conn *websocket.Conn, ch chan<- Rate, errCh chan<- error) {
 	conn.SetReadLimit(MaxMessageSize)
-	for ctx.Err() == nil {
+	for {
 		mtype, mdata, err := conn.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				fmt.Println("unexpected error")
-				errCh <- err
-			}
-			close(errCh)
+			errCh <- err
 			return
 		}
 		if mtype != websocket.TextMessage {
@@ -116,42 +130,69 @@ func readcounterflow(ctx context.Context, conn *websocket.Conn, ch chan<- Rate, 
 		}
 		ch <- Rate(float64(m.AppInfo.NumBytes) * 8 / float64(m.AppInfo.ElapsedTime))
 	}
-	// Signal we've finished reading counterflow messages.
-	errCh <- nil
 }
 
-func Sender(ctx context.Context, rates chan<- Rate, conn *websocket.Conn, bbr bool) error {
+// Sender sends ndt7 data over the provided websocket.Conn and reads
+// counterflow messages.
+//
+// The computed rate is sent to the rates channel.
+//
+// The context drives how long the connection lasts. If the context is canceled
+// or there is an error, the connection and the rates channel are closed.
+func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, enableBBR bool) error {
+	errch := make(chan error, 2)
 	defer close(rates)
-	if bbr {
+	defer conn.Close()
+	go sender(conn, rates, errch, enableBBR)
+	select {
+	case <-ctx.Done():
+		return nil
+	case err := <-errch:
+		return err
+	}
+}
+
+func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, enableBBR bool) {
+	if enableBBR {
 		ci := netx.ToConnInfo(conn.UnderlyingConn())
 		err := ci.EnableBBR()
 		rtx.Must(err, "cannot enable BBR", err)
 	}
+
 	appInfo := AppInfo{}
+
 	start := time.Now()
 	size := MinMessageSize
+
 	message, err := makePreparedMessage(size)
 	if err != nil {
-		return err
+		errch <- err
+		return
 	}
+
 	ticker := time.NewTicker(MeasureInterval)
 	defer ticker.Stop()
 
 	// Process counterflow messages and write rates to the channel.
-	errch := make(chan error)
-	go readcounterflow(ctx, conn, rates, errch)
+	go readcounterflow(conn, rates, errch)
 
-	for ctx.Err() == nil {
+	for {
 		if err := conn.WritePreparedMessage(message); err != nil {
-			return err
+			errch <- err
+			return
 		}
+
 		appInfo.NumBytes += int64(size)
 		select {
 		case <-ticker.C:
 			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
 			// emitAppInfo(&appInfo, "download")
 			// Send measurement message
-			conn.WriteJSON(Measurement{AppInfo: appInfo})
+			err := conn.WriteJSON(Measurement{AppInfo: appInfo})
+			if err != nil {
+				errch <- err
+				return
+			}
 		default:
 			// NOTHING
 		}
@@ -160,18 +201,10 @@ func Sender(ctx context.Context, rates chan<- Rate, conn *websocket.Conn, bbr bo
 		}
 		size <<= 1
 		if message, err = makePreparedMessage(size); err != nil {
-			return err
+			errch <- err
+			return
 		}
 	}
-
-	conn.Close()
-
-	// Read any errors from the readcounterflow goroutine.
-	err = <-errch
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func emitAppInfo(appInfo *AppInfo, testname string) {
