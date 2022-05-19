@@ -1,4 +1,4 @@
-module github.com/m-lab/msak
+module github.com/robertodauria/msak
 
 go 1.18
 
