@@ -42,15 +42,8 @@ func main() {
 		if conn, err := internal.Upgrade(w, r); err == nil {
 			rates := make(chan internal.Rate)
 			go func() {
-				for {
-					select {
-					case <-r.Context().Done():
-						return
-					case rate, ok := <-rates:
-						if ok {
-							fmt.Printf("Download rate: %v\n", rate)
-						}
-					}
+				for rate := range rates {
+					fmt.Printf("Download rate: %v\n", rate)
 				}
 			}()
 			err := internal.Sender(r.Context(), conn, rates, true)
@@ -63,15 +56,8 @@ func main() {
 		if conn, err := internal.Upgrade(w, r); err == nil {
 			rates := make(chan internal.Rate)
 			go func() {
-				for {
-					select {
-					case <-r.Context().Done():
-						return
-					case rate, ok := <-rates:
-						if ok {
-							fmt.Printf("Upload rate: %v\n", rate)
-						}
-					}
+				for rate := range rates {
+					fmt.Printf("Upload rate: %v\n", rate)
 				}
 			}()
 			err := internal.Receiver(r.Context(), rates, conn)

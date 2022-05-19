@@ -64,7 +64,10 @@ func Receiver(ctx context.Context, rates chan<- Rate, conn *websocket.Conn) erro
 	case <-ctx.Done():
 		return nil
 	case err := <-errch:
-		return err
+		if websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway) {
+			return err
+		}
+		return nil
 	}
 }
 
@@ -148,7 +151,10 @@ func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, enable
 	case <-ctx.Done():
 		return nil
 	case err := <-errch:
-		return err
+		if websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway) {
+			return err
+		}
+		return nil
 	}
 }
 
