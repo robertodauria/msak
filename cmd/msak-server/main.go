@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/m-lab/go/rtx"
-	internal "github.com/m-lab/msak/internal"
+	"github.com/m-lab/msak/internal"
 	"github.com/m-lab/ndt-server/ndt7/listener"
 	"github.com/m-lab/ndt-server/ndt7/spec"
 )

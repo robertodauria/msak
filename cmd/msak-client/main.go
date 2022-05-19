@@ -76,18 +76,16 @@ func multi(test internal.Test, streams int) float64 {
 
 	// Start N streams and let them run for 5 seconds.
 	timeout, _ := context.WithTimeout(context.Background(), 5*time.Second)
-	rates := map[int]internal.Rate{}
-	ratesMutex := sync.Mutex{}
+	rates := make([]internal.Rate, streams)
 	for i := 0; i < streams; i++ {
-		wg.Add(1)
+		wg.Add(2)
 		ratesCh := make(chan internal.Rate)
 		// Read from the rates channel and store rates in the map.
 		idx := i
 		go func() {
+			defer wg.Done()
 			for rate := range ratesCh {
-				ratesMutex.Lock()
 				rates[idx] = rate
-				ratesMutex.Unlock()
 			}
 		}()
 		switch test {
