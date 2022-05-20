@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -19,10 +21,19 @@ const protocol = "ws"
 const maxStreams = 10
 
 var (
-	flagServer  = flag.String("server", "localhost:8080", "Server address")
-	flagStreams = flag.Int("streams", 0, "Number of streams")
-	flagCC      = flag.String("cc", "default", "Congestion control algorithm to use")
+	flagServer       = flag.String("server", "localhost:8080", "Server address")
+	flagStreams      = flag.Int("streams", 0, "Number of streams")
+	flagCC           = flag.String("cc", "default", "Congestion control algorithm to use")
+	flagDelay        = flag.Duration("delay", 0, "Delay between each stream")
+	flagLength       = flag.Duration("length", 5*time.Second, "Length of the last stream")
+	flagOutputPrefix = flag.String("output", "result", "Output file prefix")
 )
+
+type Result struct {
+	Stream  int     `json:"stream"`
+	Elapsed float64 `json:"elapsed"`
+	Rate    float64 `json:"rate"`
+}
 
 func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 	dialer := websocket.Dialer{
@@ -80,8 +91,10 @@ func multi(test internal.Test, streams int) float64 {
 
 	wg := sync.WaitGroup{}
 
-	// Start N streams and let them run for 5 seconds.
-	timeout, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	results := make([][]Result, streams)
+
+	// Start N streams and set the timeout.
+	timeout, _ := context.WithTimeout(context.Background(), *flagLength+time.Duration(streams)**flagDelay)
 	rates := make([]internal.Rate, streams)
 	for i := 0; i < streams; i++ {
 		wg.Add(2)
@@ -89,8 +102,18 @@ func multi(test internal.Test, streams int) float64 {
 		// Read from the rates channel and store rates in the slice.
 		idx := i
 		go func() {
+			start := time.Now()
 			defer wg.Done()
 			for rate := range ratesCh {
+				result := Result{
+					Stream:  idx,
+					Elapsed: time.Since(start).Seconds(),
+					Rate:    float64(rate),
+				}
+				results[idx] = append(results[idx], result)
+				b, err := json.Marshal(result)
+				rtx.Must(err, "marshal")
+				fmt.Println(string(b))
 				rates[idx] = rate
 			}
 		}()
@@ -102,7 +125,7 @@ func multi(test internal.Test, streams int) float64 {
 		default:
 			panic("invalid test type")
 		}
-
+		time.Sleep(*flagDelay)
 	}
 	wg.Wait()
 	fmt.Printf("Completed (%d streams):\n", streams)
@@ -114,6 +137,11 @@ func multi(test internal.Test, streams int) float64 {
 	for _, bps := range rates {
 		sum += float64(bps)
 	}
+
+	resultJSON, err := json.Marshal(results)
+	rtx.Must(err, "marshal")
+	os.WriteFile(*flagOutputPrefix+"_rates_"+fmt.Sprint(streams)+".json",
+		[]byte(resultJSON), 0644)
 	return sum
 }
 
