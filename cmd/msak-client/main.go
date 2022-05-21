@@ -91,7 +91,7 @@ func multi(test internal.Test, streams int) float64 {
 
 	wg := sync.WaitGroup{}
 
-	results := make([][]Result, streams)
+	results := make([][]Result, streams+1)
 
 	// Start N streams and set the timeout.
 	timeout, _ := context.WithTimeout(context.Background(), *flagLength+time.Duration(streams)**flagDelay)
@@ -111,6 +111,17 @@ func multi(test internal.Test, streams int) float64 {
 					Rate:    float64(rate),
 				}
 				results[idx] = append(results[idx], result)
+				aggregate := 0.0
+				for _, s := range results[:len(results)-1] {
+					if len(s) > 0 {
+						aggregate += s[len(s)-1].Rate
+					}
+				}
+				results[len(results)-1] = append(results[len(results)-1], Result{
+					Stream:  len(results),
+					Elapsed: time.Since(start).Seconds(),
+					Rate:    aggregate,
+				})
 				b, err := json.Marshal(result)
 				rtx.Must(err, "marshal")
 				fmt.Println(string(b))
