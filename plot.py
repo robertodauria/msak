@@ -18,7 +18,7 @@ def main():
         with open(file, 'r') as f:
             data = json.load(f)
             for idx, _ in enumerate(data):
-                x, y = [0], [0]
+                x, y = [], []
                 for point in data[idx]:
                     x.append(point["elapsed"])
                     y.append(point["rate"])
