@@ -118,7 +118,7 @@ func multi(test internal.Test, streams int) float64 {
 					}
 				}
 				results[len(results)-1] = append(results[len(results)-1], Result{
-					Stream:  len(results),
+					Stream:  len(results) - 1,
 					Elapsed: time.Since(start).Seconds(),
 					Rate:    aggregate,
 				})
