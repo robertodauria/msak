@@ -140,7 +140,7 @@ func multi(test internal.Test, streams int) float64 {
 
 	resultJSON, err := json.Marshal(results)
 	rtx.Must(err, "marshal")
-	os.WriteFile(*flagOutputPrefix+"_rates_"+fmt.Sprint(streams)+".json",
+	os.WriteFile(*flagOutputPrefix+"_"+fmt.Sprint(streams)+".json",
 		[]byte(resultJSON), 0644)
 	return sum
 }
