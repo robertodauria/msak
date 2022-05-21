@@ -96,13 +96,13 @@ func multi(test internal.Test, streams int) float64 {
 	// Start N streams and set the timeout.
 	timeout, _ := context.WithTimeout(context.Background(), *flagLength+time.Duration(streams)**flagDelay)
 	rates := make([]internal.Rate, streams)
+	start := time.Now()
 	for i := 0; i < streams; i++ {
 		wg.Add(2)
 		ratesCh := make(chan internal.Rate)
 		// Read from the rates channel and store rates in the slice.
 		idx := i
 		go func() {
-			start := time.Now()
 			defer wg.Done()
 			for rate := range ratesCh {
 				result := Result{
