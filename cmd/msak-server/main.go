@@ -8,6 +8,8 @@ import (
 
 	"github.com/m-lab/go/rtx"
 	"github.com/robertodauria/msak/internal"
+	"github.com/robertodauria/msak/internal/persistence"
+	"github.com/robertodauria/msak/ndt7"
 )
 
 var flagEndpointCleartext = flag.String("listen", ":8080", "Listen address/port for cleartext connections")
@@ -26,28 +28,30 @@ func main() {
 		} else {
 			cc = cch
 		}
-		if conn, err := internal.Upgrade(w, r); err == nil {
-			rates := make(chan internal.Rate)
+		if conn, err := ndt7.Upgrade(w, r); err == nil {
+			measurements := make(chan persistence.Measurement)
 			go func() {
-				for rate := range rates {
+				for m := range measurements {
+					rate := float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
 					fmt.Printf("Download rate: %v\n", rate)
 				}
 			}()
-			err := internal.Sender(r.Context(), conn, rates, cc)
+			err := ndt7.Sender(r.Context(), conn, measurements, cc)
 			if err != nil {
 				fmt.Println(err)
 			}
 		}
 	}))
 	ndt7Mux.Handle(internal.UploadPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if conn, err := internal.Upgrade(w, r); err == nil {
-			rates := make(chan internal.Rate)
+		if conn, err := ndt7.Upgrade(w, r); err == nil {
+			measurements := make(chan persistence.Measurement)
 			go func() {
-				for rate := range rates {
+				for m := range measurements {
+					rate := m.AppInfo.ElapsedTime / m.AppInfo.NumBytes * 8
 					fmt.Printf("Upload rate: %v\n", rate)
 				}
 			}()
-			err := internal.Receiver(r.Context(), rates, conn)
+			err := ndt7.Receiver(r.Context(), measurements, conn)
 			if err != nil {
 				fmt.Println(err)
 			}

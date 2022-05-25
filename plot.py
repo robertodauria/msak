@@ -17,6 +17,7 @@ def main():
     for file_idx, file in enumerate(sys.argv[1:]):
         with open(file, 'r') as f:
             data = json.load(f)
+            # Plot per-stream throughput
             for idx, _ in enumerate(data):
                 x, y = [], []
                 for point in data[idx]:
@@ -24,7 +25,7 @@ def main():
                     y.append(point["rate"])
                     if point["rate"] > max_y:
                         max_y = point["rate"]
-                axis[file_idx//COLS,file_idx%COLS].plot(x, y, "x-", label="stream {}".format(idx))
+                axis[file_idx//COLS,file_idx%COLS].plot(x, y, "x-", label="stream {}".format(point["stream"]))
                 axis[file_idx//COLS,file_idx%COLS].set_xlabel("time (s)")
                 axis[file_idx//COLS,file_idx%COLS].set_ylabel("rate (B/s)")
                 axis[file_idx//COLS,file_idx%COLS].legend()

@@ -1,4 +1,4 @@
-package internal
+package ndt7
 
 import (
 	"context"
@@ -7,10 +7,18 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/m-lab/go/rtx"
+	"github.com/m-lab/tcp-info/inetdiag"
+	"github.com/m-lab/tcp-info/tcp"
+	"github.com/robertodauria/msak/internal"
+	"github.com/robertodauria/msak/internal/congestion"
+	"github.com/robertodauria/msak/internal/persistence"
+	"github.com/robertodauria/msak/internal/tcpinfox"
 )
 
 var errNonTextMessage = errors.New("not a text message")
@@ -23,7 +31,9 @@ type AppInfo struct {
 }
 
 type Measurement struct {
-	AppInfo AppInfo `json:"AppInfo"`
+	AppInfo AppInfo          `json:"AppInfo"`
+	TCPInfo tcp.LinuxTCPInfo `json:"TCPInfo"`
+	BBRInfo inetdiag.BBRInfo `json:"BBRInfo"`
 }
 
 func makePreparedMessage(size int) (*websocket.PreparedMessage, error) {
@@ -41,8 +51,8 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 	h := http.Header{}
 	h.Add("Sec-WebSocket-Protocol", proto)
 	u := websocket.Upgrader{
-		ReadBufferSize:  MaxMessageSize,
-		WriteBufferSize: MaxMessageSize,
+		ReadBufferSize:  internal.MaxMessageSize,
+		WriteBufferSize: internal.MaxMessageSize,
 	}
 	return u.Upgrade(w, r, h)
 }
@@ -53,11 +63,11 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
-func Receiver(ctx context.Context, rates chan<- Rate, conn *websocket.Conn) error {
+func Receiver(ctx context.Context, mchannel chan<- persistence.Measurement, conn *websocket.Conn) error {
 	errch := make(chan error, 1)
-	defer close(rates)
+	defer close(mchannel)
 	defer conn.Close()
-	go receiver(conn, rates, errch)
+	go receiver(conn, mchannel, errch)
 	select {
 	case <-ctx.Done():
 		return nil
@@ -69,11 +79,18 @@ func Receiver(ctx context.Context, rates chan<- Rate, conn *websocket.Conn) erro
 	}
 }
 
-func receiver(conn *websocket.Conn, rates chan<- Rate, errch chan<- error) {
-	appInfo := AppInfo{}
+func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch chan<- error) {
+	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
+	fp, err := tcpconn.File()
+	if err != nil {
+		errch <- err
+		return
+	}
+
+	appInfo := &persistence.AppInfo{}
 	start := time.Now()
-	conn.SetReadLimit(MaxMessageSize)
-	ticker := time.NewTicker(MeasureInterval)
+	conn.SetReadLimit(internal.MaxMessageSize)
+	ticker := time.NewTicker(internal.MeasureInterval)
 	defer ticker.Stop()
 	for {
 		kind, reader, err := conn.NextReader()
@@ -99,11 +116,23 @@ func receiver(conn *websocket.Conn, rates chan<- Rate, errch chan<- error) {
 		select {
 		case <-ticker.C:
 			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
-			// emitAppInfo(&appInfo, "upload")
+			// Get TCPInfo data.
+			tcpInfo, err := tcpinfox.GetTCPInfo(fp)
+			if err != nil {
+				errch <- err
+				return
+			}
+
 			// Send counterflow message
-			conn.WriteJSON(Measurement{AppInfo: appInfo})
+			m := persistence.Measurement{
+				AppInfo: appInfo,
+				TCPInfo: &persistence.TCPInfo{LinuxTCPInfo: *tcpInfo},
+			}
+
+			emit(&m, "receiver")
+			conn.WriteJSON(m)
 			// Send measurement back to the caller
-			rates <- Rate(float64(appInfo.NumBytes) * 8 / float64(appInfo.ElapsedTime))
+			mchannel <- m
 		default:
 			// NOTHING
 		}
@@ -112,8 +141,8 @@ func receiver(conn *websocket.Conn, rates chan<- Rate, errch chan<- error) {
 
 // readcounterflow reads counter flow message and reports rates.
 // Errors are reported via errCh.
-func readcounterflow(conn *websocket.Conn, ch chan<- Rate, errCh chan<- error) {
-	conn.SetReadLimit(MaxMessageSize)
+func readcounterflow(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errCh chan<- error) {
+	conn.SetReadLimit(internal.MaxMessageSize)
 	for {
 		mtype, mdata, err := conn.ReadMessage()
 		if err != nil {
@@ -124,27 +153,27 @@ func readcounterflow(conn *websocket.Conn, ch chan<- Rate, errCh chan<- error) {
 			errCh <- errNonTextMessage
 			return
 		}
-		var m Measurement
+		var m persistence.Measurement
 		if err := json.Unmarshal(mdata, &m); err != nil {
 			errCh <- err
 			return
 		}
-		ch <- Rate(float64(m.AppInfo.NumBytes) * 8 / float64(m.AppInfo.ElapsedTime))
+		mchannel <- m
 	}
 }
 
 // Sender sends ndt7 data over the provided websocket.Conn and reads
 // counterflow messages.
 //
-// The computed rate is sent to the rates channel.
+// Measurements are sent to the mchannel channel.
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
-func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, cc string) error {
+func Sender(ctx context.Context, conn *websocket.Conn, mchannel chan<- persistence.Measurement, cc string) error {
 	errch := make(chan error, 2)
-	defer close(rates)
+	defer close(mchannel)
 	defer conn.Close()
-	go sender(conn, rates, errch, cc)
+	go sender(conn, mchannel, errch, cc)
 	select {
 	case <-ctx.Done():
 		return nil
@@ -156,10 +185,17 @@ func Sender(ctx context.Context, conn *websocket.Conn, rates chan<- Rate, cc str
 	}
 }
 
-func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc string) {
+func sender(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch chan<- error, cc string) {
+	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
+	fp, err := tcpconn.File()
+	if err != nil {
+		errch <- err
+		return
+	}
+	// Attempt to set the requested congestion control algorithm.
 	if cc != "default" {
 		fmt.Printf("setting cc %s\n", cc)
-		err := SetCC(conn, cc)
+		err = congestion.Set(fp, cc)
 		if err != nil {
 			errch <- err
 			return
@@ -169,7 +205,7 @@ func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc stri
 	appInfo := AppInfo{}
 
 	start := time.Now()
-	size := MinMessageSize
+	size := internal.MinMessageSize
 
 	message, err := makePreparedMessage(size)
 	if err != nil {
@@ -177,11 +213,11 @@ func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc stri
 		return
 	}
 
-	ticker := time.NewTicker(MeasureInterval)
+	ticker := time.NewTicker(internal.MeasureInterval)
 	defer ticker.Stop()
 
-	// Process counterflow messages and write rates to the channel.
-	go readcounterflow(conn, rates, errch)
+	// Process counterflow messages
+	go readcounterflow(conn, mchannel, errch)
 
 	for {
 		if err := conn.WritePreparedMessage(message); err != nil {
@@ -193,9 +229,24 @@ func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc stri
 		select {
 		case <-ticker.C:
 			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
-			// emitAppInfo(&appInfo, "download")
+			tcpInfo, err := tcpinfox.GetTCPInfo(fp)
+			if err != nil {
+				errch <- err
+				return
+			}
+			// Get BBRInfo data.
+			bbrInfo, err := congestion.GetBBRInfo(fp)
+			if err != nil {
+				errch <- err
+				return
+			}
 			// Send measurement message
-			err := conn.WriteJSON(Measurement{AppInfo: appInfo})
+			err = conn.WriteJSON(Measurement{
+				AppInfo: appInfo,
+				TCPInfo: *tcpInfo,
+				BBRInfo: bbrInfo,
+			})
+
 			if err != nil {
 				errch <- err
 				return
@@ -203,7 +254,7 @@ func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc stri
 		default:
 			// NOTHING
 		}
-		if int64(size) >= MaxMessageSize || int64(size) >= (appInfo.NumBytes/ScalingFraction) {
+		if int64(size) >= internal.MaxMessageSize || int64(size) >= (appInfo.NumBytes/internal.ScalingFraction) {
 			continue
 		}
 		size <<= 1
@@ -214,7 +265,8 @@ func sender(conn *websocket.Conn, rates chan<- Rate, errch chan<- error, cc stri
 	}
 }
 
-func emitAppInfo(appInfo *AppInfo, testname string) {
-	fmt.Printf(`{"AppInfo":{"NumBytes":%d,"ElapsedTime":%d},"Test":"%s"}`+"\n\n",
-		appInfo.NumBytes, appInfo.ElapsedTime, testname)
+func emit(m *persistence.Measurement, testname string) {
+	b, err := json.Marshal(*m)
+	rtx.Must(err, "marshal measurement")
+	fmt.Printf("%s: %s\n", testname, string(b))
 }

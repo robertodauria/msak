@@ -3,22 +3,18 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"flag"
-	"fmt"
 	"net/http"
-	"os"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/m-lab/go/rtx"
+	"github.com/robertodauria/msak/client"
 	"github.com/robertodauria/msak/internal"
 )
 
 // TODO: implement wss :)
 const protocol = "ws"
-const maxStreams = 10
+const maxStreams = 3
 
 var (
 	flagServer       = flag.String("server", "localhost:8080", "Server address")
@@ -55,131 +51,19 @@ func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 func main() {
 	flag.Parse()
 
+	downloadURL := protocol + "://" + *flagServer + internal.DownloadPath
+
 	if *flagStreams != 0 {
 		// Single run with custom number of streams
-		downloadAggrRate := multi(internal.Download, *flagStreams)
-		uploadAggrRate := multi(internal.Upload, *flagStreams)
-		fmt.Printf("Download: %f\n", downloadAggrRate)
-		fmt.Printf("Upload: %f\n", uploadAggrRate)
+		c := client.NewWithConfig(dialer, downloadURL, *flagLength, *flagDelay, *flagStreams, *flagOutputPrefix)
+		c.Receive(context.Background())
 		return
 	}
 
-	rates := []float64{}
 	streams := 1
-	previousRate := 0.0
 	for streams <= maxStreams {
-		rate := multi(internal.Download, streams)
-		fmt.Printf("Aggregated rate (%d streams): %f\n", streams, rate)
-		rates = append(rates, rate)
-
-		if rate <= previousRate*1.05 {
-			break
-		}
+		c := client.NewWithConfig(dialer, downloadURL, *flagLength, *flagDelay, streams, *flagOutputPrefix)
+		c.Receive(context.Background())
 		streams++
-		previousRate = rate
-	}
-
-	fmt.Println("Aggregated rate by number of streams")
-	for i, rate := range rates {
-		fmt.Printf("\t%d: %f\n", i+1, rate)
-	}
-}
-
-func multi(test internal.Test, streams int) float64 {
-	uploadURL := protocol + "://" + *flagServer + internal.UploadPath
-	downloadURL := protocol + "://" + *flagServer + internal.DownloadPath
-
-	wg := sync.WaitGroup{}
-
-	results := make([][]Result, streams+1)
-
-	// Start N streams and set the timeout.
-	timeout, _ := context.WithTimeout(context.Background(), *flagLength+time.Duration(streams)**flagDelay)
-	rates := make([]internal.Rate, streams)
-	start := time.Now()
-	for i := 0; i < streams; i++ {
-		wg.Add(2)
-		ratesCh := make(chan internal.Rate)
-		// Read from the rates channel and store rates in the slice.
-		idx := i
-		go func() {
-			defer wg.Done()
-			for rate := range ratesCh {
-				result := Result{
-					Stream:  idx,
-					Elapsed: time.Since(start).Seconds(),
-					Rate:    float64(rate),
-				}
-				results[idx] = append(results[idx], result)
-				aggregate := 0.0
-				for _, s := range results[:len(results)-1] {
-					if len(s) > 0 {
-						aggregate += s[len(s)-1].Rate
-					}
-				}
-				results[len(results)-1] = append(results[len(results)-1], Result{
-					Stream:  len(results) - 1,
-					Elapsed: time.Since(start).Seconds(),
-					Rate:    aggregate,
-				})
-				b, err := json.Marshal(result)
-				rtx.Must(err, "marshal")
-				fmt.Println(string(b))
-				rates[idx] = rate
-			}
-		}()
-		switch test {
-		case internal.Upload:
-			go upload(&wg, timeout, ratesCh, uploadURL)
-		case internal.Download:
-			go download(&wg, timeout, ratesCh, downloadURL)
-		default:
-			panic("invalid test type")
-		}
-		time.Sleep(*flagDelay)
-	}
-	wg.Wait()
-	fmt.Printf("Completed (%d streams):\n", streams)
-	fmt.Println("Rates:")
-	for i, rate := range rates {
-		fmt.Printf("\t%d: %f\n", i, rate)
-	}
-	sum := 0.0
-	for _, bps := range rates {
-		sum += float64(bps)
-	}
-
-	resultJSON, err := json.Marshal(results)
-	rtx.Must(err, "marshal")
-	os.WriteFile(*flagOutputPrefix+"_"+fmt.Sprint(streams)+".json",
-		[]byte(resultJSON), 0644)
-	return sum
-}
-
-func download(wg *sync.WaitGroup, ctx context.Context, rates chan internal.Rate, url string) {
-	defer wg.Done()
-	var (
-		conn *websocket.Conn
-		err  error
-	)
-	if conn, err = dialer(ctx, url); err != nil {
-		rtx.Must(err, "download dialer")
-	}
-	if err := internal.Receiver(ctx, rates, conn); err != nil {
-		rtx.Must(err, "download")
-	}
-}
-
-func upload(wg *sync.WaitGroup, ctx context.Context, rates chan internal.Rate, url string) {
-	defer wg.Done()
-	var (
-		conn *websocket.Conn
-		err  error
-	)
-	if conn, err = dialer(ctx, url); err != nil {
-		rtx.Must(err, "upload dialer")
-	}
-	if err = internal.Sender(ctx, conn, rates, *flagCC); err != nil {
-		rtx.Must(err, "upload")
 	}
 }
