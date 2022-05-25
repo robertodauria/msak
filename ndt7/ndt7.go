@@ -15,6 +15,7 @@ import (
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/tcp-info/inetdiag"
 	"github.com/m-lab/tcp-info/tcp"
+	"github.com/m-lab/uuid"
 	"github.com/robertodauria/msak/internal"
 	"github.com/robertodauria/msak/internal/congestion"
 	"github.com/robertodauria/msak/internal/persistence"
@@ -86,6 +87,15 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 		errch <- err
 		return
 	}
+	// Get UUID for this TCP flow.
+	uuid, err := uuid.FromTCPConn(tcpconn)
+	if err != nil {
+		errch <- err
+		return
+	}
+	connInfo := &persistence.ConnectionInfo{
+		UUID: uuid,
+	}
 
 	appInfo := &persistence.AppInfo{}
 	start := time.Now()
@@ -125,8 +135,9 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 
 			// Send counterflow message
 			m := persistence.Measurement{
-				AppInfo: appInfo,
-				TCPInfo: &persistence.TCPInfo{LinuxTCPInfo: *tcpInfo},
+				AppInfo:        appInfo,
+				TCPInfo:        &persistence.TCPInfo{LinuxTCPInfo: *tcpInfo},
+				ConnectionInfo: connInfo,
 			}
 
 			emit(&m, "receiver")

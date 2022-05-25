@@ -22,7 +22,7 @@ var (
 	flagCC           = flag.String("cc", "default", "Congestion control algorithm to use")
 	flagDelay        = flag.Duration("delay", 0, "Delay between each stream")
 	flagLength       = flag.Duration("length", 5*time.Second, "Length of the last stream")
-	flagOutputPrefix = flag.String("output", "result", "Output file prefix")
+	flagOutputPrefix = flag.String("output", "results", "Output file prefix")
 )
 
 type Result struct {

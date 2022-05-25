@@ -82,15 +82,26 @@ func (r *Client) Receive(ctx context.Context) {
 	wg.Wait()
 	fmt.Printf("Completed (%d streams):\n", r.streams)
 
-	// Write each stream's result to outputPath, one per file.
-	// Create outputPath if it doesn't exist.
-	if _, err := os.Stat(r.outputPath); errors.Is(err, os.ErrNotExist) {
-		err := os.Mkdir(r.outputPath, os.ModePerm)
-		rtx.Must(err, "Could not create output directory")
-	}
+	// Write each stream's result to outputPath/<nstreams>/<uuid>.json.
 	for i, result := range results {
 		if r.outputPath != "" {
-			filename := path.Join(r.outputPath, fmt.Sprintf("%d.json", i))
+			outputFolder := path.Join(r.outputPath, fmt.Sprintf("%d", r.streams))
+			// Create the full output path if it doesn't exist.
+			if _, err := os.Stat(outputFolder); errors.Is(err, os.ErrNotExist) {
+				err := os.MkdirAll(outputFolder, os.ModePerm)
+				rtx.Must(err, "Could not create output directory")
+			}
+			// Get UUID from the latest measurement
+			if len(result.Download.ClientMeasurements) == 0 {
+				fmt.Printf("Cannot get UUID from stream %d, skipping\n", i)
+				continue
+			}
+			uuid := result.Download.
+				ClientMeasurements[len(result.Download.ClientMeasurements)-1].
+				ConnectionInfo.UUID
+
+			filename := path.Join(outputFolder, fmt.Sprintf("%s.json", uuid))
+
 			resultJSON, err := json.Marshal(result)
 			rtx.Must(err, "Failed to marshal result")
 			err = os.WriteFile(filename, resultJSON, 0644)
