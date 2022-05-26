@@ -110,16 +110,7 @@ func (r *Client) Receive(ctx context.Context) {
 		rtx.Must(err, "Could not write aggregate throughput to file")
 
 		for i, result := range results {
-			// Get UUID from the last measurement.
-			if len(result.Download.ClientMeasurements) == 0 {
-				fmt.Printf("Cannot get UUID from stream %d, skipping\n", i)
-				continue
-			}
-			uuid := result.Download.
-				ClientMeasurements[len(result.Download.ClientMeasurements)-1].
-				ConnectionInfo.UUID
-
-			filename := path.Join(outputFolder, fmt.Sprintf("%s.json", uuid))
+			filename := path.Join(outputFolder, fmt.Sprintf("%d.json", i))
 
 			for _, m := range result.Download.ClientMeasurements {
 				fmt.Printf("%v\n", m.AppInfo)
