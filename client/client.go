@@ -140,7 +140,7 @@ func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, measurements chan 
 		Server: conn.RemoteAddr().String(),
 		Client: conn.LocalAddr().String(),
 	}
-	if err := ndt7.Receiver(ctx, connInfo, measurements, conn); err != nil {
+	if err := ndt7.Receiver(ctx, conn, connInfo, measurements); err != nil {
 		rtx.Must(err, "download")
 	}
 }
