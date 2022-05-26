@@ -9,7 +9,7 @@ import (
 	"github.com/m-lab/tcp-info/inetdiag"
 )
 
-func set(*os.File) error {
+func set(*os.File, string) error {
 	return ErrNoSupport
 }
 

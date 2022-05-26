@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -156,7 +157,9 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 
 // readcounterflow reads counter flow message and reports rates.
 // Errors are reported via errCh.
-func readcounterflow(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errCh chan<- error) {
+func readcounterflow(wg *sync.WaitGroup, conn *websocket.Conn,
+	mchannel chan<- persistence.Measurement, errCh chan<- error) {
+	defer wg.Done()
 	conn.SetReadLimit(internal.MaxMessageSize)
 	for {
 		mtype, mdata, err := conn.ReadMessage()
@@ -173,34 +176,50 @@ func readcounterflow(conn *websocket.Conn, mchannel chan<- persistence.Measureme
 			errCh <- err
 			return
 		}
-		mchannel <- m
+		select {
+		case mchannel <- m:
+		default:
+			// discard message as documented
+		}
 	}
 }
 
 // Sender sends ndt7 data over the provided websocket.Conn and reads
 // counterflow messages.
 //
-// Measurements are sent to the mchannel channel.
+// Measurements are sent to the mchannel channel. You SHOULD pass
+// to this function a channel with a reasonably large buffer (e.g.,
+// 64 slots) because the emitter will not block on sending.
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
 func Sender(ctx context.Context, conn *websocket.Conn, mchannel chan<- persistence.Measurement, cc string) error {
 	errch := make(chan error, 2)
-	defer close(mchannel)
-	defer conn.Close()
-	go sender(conn, mchannel, errch, cc)
+	wg := &sync.WaitGroup{}
+	// TODO: can we start the counterflow reader here to (1) avoid passing the
+	// mchannel to a function that basically does not neeed it (sender) and
+	// (2) make the synchronization pattern fully obviously and implemented in
+	// a single place (i.e., here)?
+	wg.Add(1)
+	go sender(wg, conn, mchannel, errch, cc)
+	var err error
 	select {
 	case <-ctx.Done():
-		return nil
-	case err := <-errch:
-		if websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway) {
-			return err
+		// nothing
+	case err = <-errch:
+		if !websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway) {
+			err = nil
 		}
-		return nil
 	}
+	conn.Close()    // signal child goroutines it's time to stop
+	wg.Wait()       // wait for goroutines to join
+	close(mchannel) // signal parent we're done now
+	return err
 }
 
-func sender(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch chan<- error, cc string) {
+func sender(wg *sync.WaitGroup, conn *websocket.Conn, mchannel chan<- persistence.Measurement,
+	errch chan<- error, cc string) {
+	defer wg.Done()
 	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
 	fp, err := tcpconn.File()
 	if err != nil {
@@ -232,7 +251,8 @@ func sender(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch
 	defer ticker.Stop()
 
 	// Process counterflow messages
-	go readcounterflow(conn, mchannel, errch)
+	wg.Add(1)
+	go readcounterflow(wg, conn, mchannel, errch)
 
 	for {
 		if err := conn.WritePreparedMessage(message); err != nil {

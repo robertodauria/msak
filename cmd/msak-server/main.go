@@ -29,7 +29,8 @@ func main() {
 			cc = cch
 		}
 		if conn, err := ndt7.Upgrade(w, r); err == nil {
-			measurements := make(chan persistence.Measurement)
+			const buffersize = 64 // the emitter will not wait for us
+			measurements := make(chan persistence.Measurement, buffersize)
 			go func() {
 				for m := range measurements {
 					rate := float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
