@@ -110,7 +110,7 @@ func (r *Client) Receive(ctx context.Context) {
 		rtx.Must(err, "Could not write aggregate throughput to file")
 
 		for i, result := range results {
-			// Get UUID from the latest measurement
+			// Get UUID from the last measurement.
 			if len(result.Download.ClientMeasurements) == 0 {
 				fmt.Printf("Cannot get UUID from stream %d, skipping\n", i)
 				continue
@@ -142,7 +142,11 @@ func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, measurements chan 
 	if conn, err = r.dialer(ctx, r.url); err != nil {
 		rtx.Must(err, "download dialer")
 	}
-	if err := ndt7.Receiver(ctx, measurements, conn); err != nil {
+	connInfo := &persistence.ConnectionInfo{
+		Server: conn.RemoteAddr().String(),
+		Client: conn.LocalAddr().String(),
+	}
+	if err := ndt7.Receiver(ctx, connInfo, measurements, conn); err != nil {
 		rtx.Must(err, "download")
 	}
 }

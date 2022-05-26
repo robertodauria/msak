@@ -15,7 +15,6 @@ import (
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/tcp-info/inetdiag"
 	"github.com/m-lab/tcp-info/tcp"
-	"github.com/m-lab/uuid"
 	"github.com/robertodauria/msak/internal"
 	"github.com/robertodauria/msak/internal/congestion"
 	"github.com/robertodauria/msak/internal/persistence"
@@ -64,11 +63,12 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
-func Receiver(ctx context.Context, mchannel chan<- persistence.Measurement, conn *websocket.Conn) error {
+func Receiver(ctx context.Context, connInfo *persistence.ConnectionInfo, mchannel chan<- persistence.Measurement,
+	conn *websocket.Conn) error {
 	errch := make(chan error, 1)
 	defer close(mchannel)
 	defer conn.Close()
-	go receiver(conn, mchannel, errch)
+	go receiver(conn, connInfo, mchannel, errch)
 	select {
 	case <-ctx.Done():
 		return nil
@@ -80,24 +80,14 @@ func Receiver(ctx context.Context, mchannel chan<- persistence.Measurement, conn
 	}
 }
 
-func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch chan<- error) {
+func receiver(conn *websocket.Conn, connInfo *persistence.ConnectionInfo, mchannel chan<- persistence.Measurement,
+	errch chan<- error) {
 	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
 	fp, err := tcpconn.File()
 	if err != nil {
 		errch <- err
 		return
 	}
-	// Get UUID for this TCP flow.
-	uuid, err := uuid.FromTCPConn(tcpconn)
-	if err != nil {
-		errch <- err
-		return
-	}
-	connInfo := &persistence.ConnectionInfo{
-		UUID: uuid,
-	}
-
-	appInfo := &persistence.AppInfo{}
 	numBytes := int64(0)
 	start := time.Now()
 	conn.SetReadLimit(internal.MaxMessageSize)
@@ -126,13 +116,14 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 		numBytes += int64(n)
 		select {
 		case <-ticker.C:
-			appInfo = &persistence.AppInfo{
+			appInfo := &persistence.AppInfo{
 				NumBytes:    int64(numBytes),
 				ElapsedTime: time.Since(start).Microseconds(),
 			}
+
 			// Get TCPInfo data.
 			tcpInfo, err := tcpinfox.GetTCPInfo(fp)
-			if err != nil {
+			if err != nil && !errors.Is(err, tcpinfox.ErrNoSupport) {
 				errch <- err
 				return
 			}
@@ -156,7 +147,9 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 
 // readcounterflow reads counter flow message and reports rates.
 // Errors are reported via errCh.
-func readcounterflow(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errCh chan<- error) {
+func readcounterflow(conn *websocket.Conn, mchannel chan<- persistence.Measurement,
+	errCh chan<- error) {
+	defer close(mchannel)
 	conn.SetReadLimit(internal.MaxMessageSize)
 	for {
 		mtype, mdata, err := conn.ReadMessage()
@@ -173,34 +166,43 @@ func readcounterflow(conn *websocket.Conn, mchannel chan<- persistence.Measureme
 			errCh <- err
 			return
 		}
-		mchannel <- m
+		select {
+		case mchannel <- m:
+		default:
+			// discard message as documented
+		}
 	}
 }
 
 // Sender sends ndt7 data over the provided websocket.Conn and reads
 // counterflow messages.
 //
-// Measurements are sent to the mchannel channel.
+// Measurements are sent to the mchannel channel. You SHOULD pass
+// to this function a channel with a reasonably large buffer (e.g.,
+// 64 slots) because the emitter will not block on sending.
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
-func Sender(ctx context.Context, conn *websocket.Conn, mchannel chan<- persistence.Measurement, cc string) error {
+func Sender(ctx context.Context, conn *websocket.Conn, connInfo *persistence.ConnectionInfo,
+	mchannel chan<- persistence.Measurement, cc string) error {
+	defer conn.Close() // signal child goroutines it's time to stop
 	errch := make(chan error, 2)
-	defer close(mchannel)
-	defer conn.Close()
-	go sender(conn, mchannel, errch, cc)
+	// Process counterflow messages
+	go readcounterflow(conn, mchannel, errch)
+	go sender(conn, errch, cc)
+	var err error
 	select {
 	case <-ctx.Done():
 		return nil
-	case err := <-errch:
+	case err = <-errch:
 		if websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway) {
 			return err
 		}
-		return nil
 	}
+	return err
 }
 
-func sender(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch chan<- error, cc string) {
+func sender(conn *websocket.Conn, errch chan<- error, cc string) {
 	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
 	fp, err := tcpconn.File()
 	if err != nil {
@@ -230,9 +232,6 @@ func sender(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch
 
 	ticker := time.NewTicker(internal.MeasureInterval)
 	defer ticker.Stop()
-
-	// Process counterflow messages
-	go readcounterflow(conn, mchannel, errch)
 
 	for {
 		if err := conn.WritePreparedMessage(message); err != nil {
