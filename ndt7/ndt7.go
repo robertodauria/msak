@@ -66,7 +66,6 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 func Receiver(ctx context.Context, connInfo *persistence.ConnectionInfo, mchannel chan<- persistence.Measurement,
 	conn *websocket.Conn) error {
 	errch := make(chan error, 1)
-	defer close(mchannel)
 	defer conn.Close()
 	go receiver(conn, connInfo, mchannel, errch)
 	select {
@@ -82,6 +81,7 @@ func Receiver(ctx context.Context, connInfo *persistence.ConnectionInfo, mchanne
 
 func receiver(conn *websocket.Conn, connInfo *persistence.ConnectionInfo, mchannel chan<- persistence.Measurement,
 	errch chan<- error) {
+	defer close(mchannel)
 	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
 	fp, err := tcpconn.File()
 	if err != nil {
