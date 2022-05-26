@@ -98,6 +98,7 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 	}
 
 	appInfo := &persistence.AppInfo{}
+	numBytes := int64(0)
 	start := time.Now()
 	conn.SetReadLimit(internal.MaxMessageSize)
 	ticker := time.NewTicker(internal.MeasureInterval)
@@ -114,7 +115,7 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 				errch <- err
 				return
 			}
-			appInfo.NumBytes += int64(len(data))
+			numBytes += int64(len(data))
 			continue
 		}
 		n, err := io.Copy(ioutil.Discard, reader)
@@ -122,10 +123,13 @@ func receiver(conn *websocket.Conn, mchannel chan<- persistence.Measurement, err
 			errch <- err
 			return
 		}
-		appInfo.NumBytes += int64(n)
+		numBytes += int64(n)
 		select {
 		case <-ticker.C:
-			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
+			appInfo = &persistence.AppInfo{
+				NumBytes:    int64(numBytes),
+				ElapsedTime: time.Since(start).Microseconds(),
+			}
 			// Get TCPInfo data.
 			tcpInfo, err := tcpinfox.GetTCPInfo(fp)
 			if err != nil {
@@ -245,12 +249,8 @@ func sender(conn *websocket.Conn, mchannel chan<- persistence.Measurement, errch
 				errch <- err
 				return
 			}
-			// Get BBRInfo data.
-			bbrInfo, err := congestion.GetBBRInfo(fp)
-			if err != nil {
-				errch <- err
-				return
-			}
+			// Get BBRInfo data, if available.
+			bbrInfo, _ := congestion.GetBBRInfo(fp)
 			// Send measurement message
 			err = conn.WriteJSON(Measurement{
 				AppInfo: appInfo,

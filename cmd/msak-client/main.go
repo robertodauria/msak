@@ -21,7 +21,7 @@ var (
 	flagStreams      = flag.Int("streams", 0, "Number of streams")
 	flagCC           = flag.String("cc", "default", "Congestion control algorithm to use")
 	flagDelay        = flag.Duration("delay", 0, "Delay between each stream")
-	flagLength       = flag.Duration("length", 5*time.Second, "Length of the last stream")
+	flagDuration     = flag.Duration("duration", 5*time.Second, "Length of the last stream")
 	flagOutputPrefix = flag.String("output", "results", "Output file prefix")
 )
 
@@ -55,14 +55,14 @@ func main() {
 
 	if *flagStreams != 0 {
 		// Single run with custom number of streams
-		c := client.NewWithConfig(dialer, downloadURL, *flagLength, *flagDelay, *flagStreams, *flagOutputPrefix)
+		c := client.NewWithConfig(dialer, downloadURL, *flagDuration, *flagDelay, *flagStreams, *flagOutputPrefix)
 		c.Receive(context.Background())
 		return
 	}
 
 	streams := 1
 	for streams <= maxStreams {
-		c := client.NewWithConfig(dialer, downloadURL, *flagLength, *flagDelay, streams, *flagOutputPrefix)
+		c := client.NewWithConfig(dialer, downloadURL, *flagDuration, *flagDelay, streams, *flagOutputPrefix)
 		c.Receive(context.Background())
 		streams++
 	}

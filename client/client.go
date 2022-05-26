@@ -57,10 +57,15 @@ func (r *Client) Receive(ctx context.Context) {
 
 	wg := sync.WaitGroup{}
 
+	rates := make([]float64, r.streams)
+	aggregateRates := make(map[string]float64)
+	start := time.Now()
+
 	for i := 0; i < r.streams; i++ {
 		wg.Add(2)
 		measurements := make(chan persistence.Measurement)
 
+		results[i].StartTime = time.Now()
 		results[i].Download = &persistence.ArchivalData{}
 		idx := i
 
@@ -72,6 +77,12 @@ func (r *Client) Receive(ctx context.Context) {
 				results[idx].Download.ClientMeasurements =
 					append(results[idx].Download.ClientMeasurements, m)
 				fmt.Printf("Rate: %v Mb/s\n", float64(m.AppInfo.NumBytes)/float64(m.AppInfo.ElapsedTime)*8)
+				// Sum the throughput for all the streams.
+				rates[idx] = float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
+				aggregateTime := time.Since(start).Seconds()
+				for j := 0; j < r.streams; j++ {
+					aggregateRates[fmt.Sprintf("%f", aggregateTime)] += rates[j]
+				}
 			}
 		}()
 
@@ -83,14 +94,22 @@ func (r *Client) Receive(ctx context.Context) {
 	fmt.Printf("Completed (%d streams):\n", r.streams)
 
 	// Write each stream's result to outputPath/<nstreams>/<uuid>.json.
-	for i, result := range results {
-		if r.outputPath != "" {
-			outputFolder := path.Join(r.outputPath, fmt.Sprintf("%d", r.streams))
-			// Create the full output path if it doesn't exist.
-			if _, err := os.Stat(outputFolder); errors.Is(err, os.ErrNotExist) {
-				err := os.MkdirAll(outputFolder, os.ModePerm)
-				rtx.Must(err, "Could not create output directory")
-			}
+	if r.outputPath != "" {
+		outputFolder := path.Join(r.outputPath, fmt.Sprintf("%d", r.streams))
+		// Create the full output path if it doesn't exist.
+		if _, err := os.Stat(outputFolder); errors.Is(err, os.ErrNotExist) {
+			err := os.MkdirAll(outputFolder, os.ModePerm)
+			rtx.Must(err, "Could not create output directory")
+		}
+
+		// Write aggregate throughput.
+		aggregateJSON, err := json.Marshal(aggregateRates)
+		rtx.Must(err, "Could not marshal aggregate throughput")
+		aggregateFile := path.Join(outputFolder, "aggregate.json")
+		err = os.WriteFile(aggregateFile, aggregateJSON, 0644)
+		rtx.Must(err, "Could not write aggregate throughput to file")
+
+		for i, result := range results {
 			// Get UUID from the latest measurement
 			if len(result.Download.ClientMeasurements) == 0 {
 				fmt.Printf("Cannot get UUID from stream %d, skipping\n", i)
@@ -101,6 +120,10 @@ func (r *Client) Receive(ctx context.Context) {
 				ConnectionInfo.UUID
 
 			filename := path.Join(outputFolder, fmt.Sprintf("%s.json", uuid))
+
+			for _, m := range result.Download.ClientMeasurements {
+				fmt.Printf("%v\n", m.AppInfo)
+			}
 
 			resultJSON, err := json.Marshal(result)
 			rtx.Must(err, "Failed to marshal result")
