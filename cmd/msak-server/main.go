@@ -57,7 +57,7 @@ func main() {
 				}
 			}()
 			connInfo := getConnInfo(conn)
-			err := ndt7.Receiver(r.Context(), connInfo, measurements, conn)
+			err := ndt7.Receiver(r.Context(), conn, connInfo, measurements)
 			if err != nil {
 				fmt.Println(err)
 			}

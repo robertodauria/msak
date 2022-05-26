@@ -63,8 +63,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
 //
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
-func Receiver(ctx context.Context, connInfo *persistence.ConnectionInfo, mchannel chan<- persistence.Measurement,
-	conn *websocket.Conn) error {
+func Receiver(ctx context.Context, conn *websocket.Conn, connInfo *persistence.ConnectionInfo, mchannel chan<- persistence.Measurement) error {
 	errch := make(chan error, 1)
 	defer conn.Close()
 	go receiver(conn, connInfo, mchannel, errch)
