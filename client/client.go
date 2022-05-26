@@ -59,6 +59,7 @@ func (r *Client) Receive(ctx context.Context) {
 
 	rates := make([]float64, r.streams)
 	aggregateRates := make(map[string]float64)
+	aggregateRatesMutex := &sync.Mutex{}
 	start := time.Now()
 
 	for i := 0; i < r.streams; i++ {
@@ -81,7 +82,9 @@ func (r *Client) Receive(ctx context.Context) {
 				rates[idx] = float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
 				aggregateTime := time.Since(start).Seconds()
 				for j := 0; j < r.streams; j++ {
+					aggregateRatesMutex.Lock()
 					aggregateRates[fmt.Sprintf("%f", aggregateTime)] += rates[j]
+					aggregateRatesMutex.Unlock()
 				}
 			}
 		}()
