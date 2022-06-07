@@ -47,6 +47,7 @@ type Measurement struct {
 	ConnectionInfo *ConnectionInfo `json:",omitempty" bigquery:"-"`
 	BBRInfo        *BBRInfo        `json:",omitempty"`
 	TCPInfo        *TCPInfo        `json:",omitempty"`
+	Origin         string          `json:",omitempty"`
 }
 
 // AppInfo contains an application level measurement. This structure is
@@ -76,4 +77,5 @@ type BBRInfo struct {
 // structure is described in the ndt7 specification.
 type TCPInfo struct {
 	tcp.LinuxTCPInfo
+	ElapsedTime int64
 }

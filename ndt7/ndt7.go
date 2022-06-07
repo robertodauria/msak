@@ -2,6 +2,7 @@ package ndt7
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,8 +14,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/go/rtx"
-	"github.com/m-lab/tcp-info/inetdiag"
-	"github.com/m-lab/tcp-info/tcp"
 	"github.com/robertodauria/msak/internal"
 	"github.com/robertodauria/msak/internal/congestion"
 	"github.com/robertodauria/msak/internal/persistence"
@@ -25,19 +24,13 @@ var errNonTextMessage = errors.New("not a text message")
 
 type Rate float64
 
-type AppInfo struct {
-	NumBytes    int64
-	ElapsedTime int64
-}
-
-type Measurement struct {
-	AppInfo AppInfo          `json:"AppInfo"`
-	TCPInfo tcp.LinuxTCPInfo `json:"TCPInfo"`
-	BBRInfo inetdiag.BBRInfo `json:"BBRInfo"`
-}
-
 func makePreparedMessage(size int) (*websocket.PreparedMessage, error) {
-	return websocket.NewPreparedMessage(websocket.BinaryMessage, make([]byte, size))
+	data := make([]byte, size)
+	_, err := rand.Read(data)
+	if err != nil {
+		return nil, err
+	}
+	return websocket.NewPreparedMessage(websocket.BinaryMessage, data)
 }
 
 // Upgrade upgrades the HTTP connection to WebSockets.
@@ -99,14 +92,25 @@ func receiver(conn *websocket.Conn, connInfo *persistence.ConnectionInfo, mchann
 			return
 		}
 		if kind == websocket.TextMessage {
+			// Text messages are sender-side measurements: read as JSON and
+			// send them over the mchannel channel.
 			data, err := ioutil.ReadAll(reader)
 			if err != nil {
 				errch <- err
 				return
 			}
+			// Make sure the message's byte are counted.
 			numBytes += int64(len(data))
+			var m persistence.Measurement
+			if err := json.Unmarshal(data, &m); err != nil {
+				errch <- err
+				return
+			}
+			mchannel <- m
 			continue
 		}
+
+		// Binary message: count bytes and discard.
 		n, err := io.Copy(ioutil.Discard, reader)
 		if err != nil {
 			errch <- err
@@ -127,16 +131,17 @@ func receiver(conn *websocket.Conn, connInfo *persistence.ConnectionInfo, mchann
 				return
 			}
 
-			// Send counterflow message
+			// Send counterflow message.
 			m := persistence.Measurement{
 				AppInfo:        appInfo,
 				TCPInfo:        &persistence.TCPInfo{LinuxTCPInfo: *tcpInfo},
 				ConnectionInfo: connInfo,
+				Origin:         "receiver",
 			}
 
 			emit(&m, "receiver")
 			conn.WriteJSON(m)
-			// Send measurement back to the caller
+			// Send measurement over the mchannel channel.
 			mchannel <- m
 		default:
 			// NOTHING
@@ -188,7 +193,7 @@ func Sender(ctx context.Context, conn *websocket.Conn, connInfo *persistence.Con
 	errch := make(chan error, 2)
 	// Process counterflow messages
 	go readcounterflow(conn, mchannel, errch)
-	go sender(conn, errch, cc)
+	go sender(conn, connInfo, errch, cc)
 	var err error
 	select {
 	case <-ctx.Done():
@@ -201,7 +206,7 @@ func Sender(ctx context.Context, conn *websocket.Conn, connInfo *persistence.Con
 	return err
 }
 
-func sender(conn *websocket.Conn, errch chan<- error, cc string) {
+func sender(conn *websocket.Conn, connInfo *persistence.ConnectionInfo, errch chan<- error, cc string) {
 	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
 	fp, err := tcpconn.File()
 	if err != nil {
@@ -218,7 +223,7 @@ func sender(conn *websocket.Conn, errch chan<- error, cc string) {
 		}
 	}
 
-	appInfo := AppInfo{}
+	appInfo := &persistence.AppInfo{}
 
 	start := time.Now()
 	size := internal.MinMessageSize
@@ -250,10 +255,15 @@ func sender(conn *websocket.Conn, errch chan<- error, cc string) {
 			// Get BBRInfo data, if available.
 			bbrInfo, _ := congestion.GetBBRInfo(fp)
 			// Send measurement message
-			err = conn.WriteJSON(Measurement{
+			err = conn.WriteJSON(persistence.Measurement{
 				AppInfo: appInfo,
-				TCPInfo: *tcpInfo,
-				BBRInfo: bbrInfo,
+				TCPInfo: &persistence.TCPInfo{
+					LinuxTCPInfo: *tcpInfo,
+					ElapsedTime:  appInfo.ElapsedTime,
+				},
+				BBRInfo:        &persistence.BBRInfo{BBRInfo: bbrInfo},
+				ConnectionInfo: connInfo,
+				Origin:         "sender",
 			})
 
 			if err != nil {

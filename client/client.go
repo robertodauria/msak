@@ -75,16 +75,26 @@ func (r *Client) Receive(ctx context.Context) {
 		go func() {
 			defer wg.Done()
 			for m := range measurements {
-				results[idx].Download.ClientMeasurements =
-					append(results[idx].Download.ClientMeasurements, m)
-				fmt.Printf("Rate: %v Mb/s\n", float64(m.AppInfo.NumBytes)/float64(m.AppInfo.ElapsedTime)*8)
-				// Sum the throughput for all the streams.
-				rates[idx] = float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
-				aggregateTime := time.Since(start).Seconds()
-				for j := 0; j < r.streams; j++ {
-					aggregateRatesMutex.Lock()
-					aggregateRates[fmt.Sprintf("%f", aggregateTime)] += rates[j]
-					aggregateRatesMutex.Unlock()
+				if m.Origin == "receiver" {
+					results[idx].Download.ClientMeasurements =
+						append(results[idx].Download.ClientMeasurements, m)
+				} else {
+					results[idx].Download.ServerMeasurements =
+						append(results[idx].Download.ServerMeasurements, m)
+					// Get the rate from sender-side TCPInfo. This may be more
+					// accurate than receiver-side AppInfo data since AppInfo
+					// only counts WebSocket messages' bytes after the message
+					// has been fully received, while sender-side TCPInfo
+					// accounts for half-sent messages, too.
+					fmt.Printf("Avg rate: %v Mb/s\n", float64(m.TCPInfo.BytesAcked)/float64(m.TCPInfo.ElapsedTime)*8)
+					// Sum the throughput for all the streams.
+					rates[idx] = float64(m.TCPInfo.BytesAcked) / float64(m.TCPInfo.ElapsedTime) * 8
+					aggregateTime := time.Since(start).Seconds()
+					for j := 0; j < r.streams; j++ {
+						aggregateRatesMutex.Lock()
+						aggregateRates[fmt.Sprintf("%f", aggregateTime)] += rates[j]
+						aggregateRatesMutex.Unlock()
+					}
 				}
 			}
 		}()
@@ -114,11 +124,6 @@ func (r *Client) Receive(ctx context.Context) {
 
 		for i, result := range results {
 			filename := path.Join(outputFolder, fmt.Sprintf("%d.json", i))
-
-			for _, m := range result.Download.ClientMeasurements {
-				fmt.Printf("%v\n", m.AppInfo)
-			}
-
 			resultJSON, err := json.Marshal(result)
 			rtx.Must(err, "Failed to marshal result")
 			err = os.WriteFile(filename, resultJSON, 0644)
