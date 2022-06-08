@@ -8,7 +8,7 @@ import matplotlib
 import pylab
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) < 2:
         print("Usage: {} <input folder 1> <input folder 2>".format(sys.argv[0]))
         sys.exit(1)
 
@@ -22,7 +22,9 @@ def main():
         nstream_dirs.sort()
         # Create a subplot for each folder. 
         for row, nstreams_dir in enumerate(nstream_dirs):
-            for i, file in enumerate(os.listdir(os.path.join(root_dir, nstreams_dir))):
+            files = os.listdir(os.path.join(root_dir, nstreams_dir))
+            files.sort()
+            for i, file in enumerate(files):
                 if file.startswith("aggregate"):
                     with open(os.path.join(root_dir, nstreams_dir, file)) as f:
                         data = json.load(f)
@@ -32,14 +34,23 @@ def main():
                     with open(os.path.join(root_dir, nstreams_dir, file)) as f:
                         data = json.load(f)
                         # Get the x,y values from the data
-                        x, y = [], []
-                        for measurements in data.get("Download").get("ClientMeasurements"):
-                            time = measurements.get("AppInfo").get("ElapsedTime") / 1000000
-                            rate = measurements.get("AppInfo").get("NumBytes") / time / 1000000 * 8
-                            x.append(time)
-                            y.append(rate)
+                        avg_x, avg_y = [], []
+                        rate_x, rate_y = [], []
+                        previous = None
+                        for measurement in data.get("Download").get("ServerMeasurements"):
+                            time = measurement.get("TCPInfo").get("ElapsedTime") / 1000000
+                            rate = measurement.get("TCPInfo").get("BytesAcked") / time / 1000000 * 8
+                            avg_x.append(time)
+                            avg_y.append(rate)
+                            if previous is not None:
+                                dtime = measurement.get("TCPInfo").get("ElapsedTime") - previous.get("TCPInfo").get("ElapsedTime")
+                                dbytes = measurement.get("TCPInfo").get("BytesAcked") - previous.get("TCPInfo").get("BytesAcked")
+                                rate_x.append(time)
+                                rate_y.append(dbytes / dtime * 8)
+                            previous = measurement
 
-                        axes[row][col].plot(x, y, "x-", label=i)
+                        axes[row][col].plot(avg_x, avg_y, "x:", label="avg. rate {}".format(i))
+                        axes[row][col].plot(rate_x, rate_y, "x-", label="rate {}".format(i))
 
             # Make sure the ticks are always visible.
             axes[row][col].tick_params(labelleft=True)
