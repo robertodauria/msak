@@ -57,9 +57,9 @@ func (r *Client) Receive(ctx context.Context) {
 
 	wg := sync.WaitGroup{}
 
-	rates := make([]float64, r.streams)
-	aggregateRates := make(map[string]float64)
-	aggregateRatesMutex := &sync.Mutex{}
+	avgRates := make([]float64, r.streams)
+	aggregateAvgRates := make(map[string]float64)
+	aggregateAvgRatesMutex := &sync.Mutex{}
 	start := time.Now()
 
 	for i := 0; i < r.streams; i++ {
@@ -76,25 +76,20 @@ func (r *Client) Receive(ctx context.Context) {
 			defer wg.Done()
 			for m := range measurements {
 				if m.Origin == "receiver" {
+					fmt.Printf("Avg rate: %v Mb/s\n", float64(m.AppInfo.NumBytes)/float64(m.AppInfo.ElapsedTime)*8)
+					// Sum the throughput for all the streams.
+					avgRates[idx] = float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
+					aggregateTime := time.Since(start).Seconds()
+					for j := 0; j < r.streams; j++ {
+						aggregateAvgRatesMutex.Lock()
+						aggregateAvgRates[fmt.Sprintf("%f", aggregateTime)] += avgRates[j]
+						aggregateAvgRatesMutex.Unlock()
+					}
 					results[idx].Download.ClientMeasurements =
 						append(results[idx].Download.ClientMeasurements, m)
 				} else {
 					results[idx].Download.ServerMeasurements =
 						append(results[idx].Download.ServerMeasurements, m)
-					// Get the rate from sender-side TCPInfo. This may be more
-					// accurate than receiver-side AppInfo data since AppInfo
-					// only counts WebSocket messages' bytes after the message
-					// has been fully received, while sender-side TCPInfo
-					// accounts for half-sent messages, too.
-					fmt.Printf("Avg rate: %v Mb/s\n", float64(m.TCPInfo.BytesAcked)/float64(m.TCPInfo.ElapsedTime)*8)
-					// Sum the throughput for all the streams.
-					rates[idx] = float64(m.TCPInfo.BytesAcked) / float64(m.TCPInfo.ElapsedTime) * 8
-					aggregateTime := time.Since(start).Seconds()
-					for j := 0; j < r.streams; j++ {
-						aggregateRatesMutex.Lock()
-						aggregateRates[fmt.Sprintf("%f", aggregateTime)] += rates[j]
-						aggregateRatesMutex.Unlock()
-					}
 				}
 			}
 		}()
@@ -116,7 +111,7 @@ func (r *Client) Receive(ctx context.Context) {
 		}
 
 		// Write aggregate throughput.
-		aggregateJSON, err := json.Marshal(aggregateRates)
+		aggregateJSON, err := json.Marshal(aggregateAvgRates)
 		rtx.Must(err, "Could not marshal aggregate throughput")
 		aggregateFile := path.Join(outputFolder, "aggregate.json")
 		err = os.WriteFile(aggregateFile, aggregateJSON, 0644)
