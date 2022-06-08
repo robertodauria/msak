@@ -7,4 +7,3 @@ go build -v 							       \
     -tags netgo                                                        \
     -ldflags "$versionflags -extldflags \"-static\""                   \
     ./cmd/msak-client
-
