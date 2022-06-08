@@ -4,7 +4,7 @@ Prototype client/server implementation of a multi-stream [ndt7](https://github.c
 
 The goal is to provide an implementation of ndt7 (client and server) fully compliant with the specification, including optional fields. Then, extend the specification as needed to support measuring the network with multiple TCP flows and aggregate the results.
 
-The data format is currently compatible with ndt-server (you can use msak-client to measure against ndt-server, even if some advanced features may not work) but there is no guarantee that this won't change in the near future.
+The data format is currently compatible with ndt-server (you can use msak-client to measure against ndt-server, even if some advanced features like CC algorithm selection will not work) but there is no guarantee that this won't change in the near future.
 
 ## Running the server
 
