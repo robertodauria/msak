@@ -60,7 +60,12 @@ func (r *Client) Receive(ctx context.Context) {
 	avgRates := make([]float64, r.streams)
 	aggregateAvgRates := make(map[string]float64)
 	aggregateAvgRatesMutex := &sync.Mutex{}
+
 	start := time.Now()
+	// Set all the results' start times to the same start time.
+	for _, r := range results {
+		r.StartTime = start
+	}
 
 	for i := 0; i < r.streams; i++ {
 		wg.Add(2)
@@ -94,11 +99,17 @@ func (r *Client) Receive(ctx context.Context) {
 			}
 		}()
 
-		go r.run(&wg, timeout, measurements)
+		go r.run(&wg, timeout, &results[i], measurements)
 		time.Sleep(r.delay)
 	}
 
 	wg.Wait()
+	end := time.Now()
+	// Set all the results' end times to the same end time.
+	for _, r := range results {
+		r.EndTime = end
+	}
+
 	fmt.Printf("Completed (%d streams):\n", r.streams)
 
 	// Write each stream's result to outputPath/<nstreams>/<uuid>.json.
@@ -127,7 +138,8 @@ func (r *Client) Receive(ctx context.Context) {
 	}
 }
 
-func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, measurements chan persistence.Measurement) {
+func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, result *persistence.NDT7Result,
+	measurements chan persistence.Measurement) {
 	defer wg.Done()
 	var (
 		conn *websocket.Conn
@@ -136,6 +148,8 @@ func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, measurements chan 
 	if conn, err = r.dialer(ctx, r.url); err != nil {
 		rtx.Must(err, "download dialer")
 	}
+	result.Download.StartTime = time.Now()
+
 	connInfo := &persistence.ConnectionInfo{
 		Server: conn.RemoteAddr().String(),
 		Client: conn.LocalAddr().String(),
@@ -143,4 +157,5 @@ func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, measurements chan 
 	if err := ndt7.Receiver(ctx, conn, connInfo, measurements); err != nil {
 		rtx.Must(err, "download")
 	}
+	result.Download.EndTime = time.Now()
 }
