@@ -12,8 +12,8 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/go/rtx"
-	"github.com/robertodauria/msak/internal/persistence"
-	"github.com/robertodauria/msak/ndt7"
+	"github.com/robertodauria/msak/pkg/ndtm"
+	"github.com/robertodauria/msak/pkg/ndtm/results"
 )
 
 type dialerFunc func(ctx context.Context, url string) (*websocket.Conn, error)
@@ -50,7 +50,7 @@ func NewWithConfig(dialer dialerFunc, url string, duration time.Duration,
 
 // Receive starts nStreams streams to receive measurement data from the server.
 func (r *Client) Receive(ctx context.Context) {
-	results := make([]persistence.NDT7Result, r.streams)
+	res := make([]results.NDTMResult, r.streams)
 
 	timeout, cancel := context.WithTimeout(ctx, r.duration+time.Duration(r.streams)*r.delay)
 	defer cancel()
@@ -63,16 +63,15 @@ func (r *Client) Receive(ctx context.Context) {
 
 	start := time.Now()
 	// Set all the results' start times to the same start time.
-	for _, r := range results {
+	for _, r := range res {
 		r.StartTime = start
 	}
 
 	for i := 0; i < r.streams; i++ {
 		wg.Add(2)
-		measurements := make(chan persistence.Measurement)
+		measurements := make(chan results.Measurement)
 
-		results[i].StartTime = time.Now()
-		results[i].Download = &persistence.ArchivalData{}
+		res[i].StartTime = time.Now()
 		idx := i
 
 		// Read from the measurements channel and store them in the results
@@ -90,23 +89,23 @@ func (r *Client) Receive(ctx context.Context) {
 						aggregateAvgRates[fmt.Sprintf("%f", aggregateTime)] += avgRates[j]
 						aggregateAvgRatesMutex.Unlock()
 					}
-					results[idx].Download.ClientMeasurements =
-						append(results[idx].Download.ClientMeasurements, m)
+					res[idx].ClientMeasurements =
+						append(res[idx].ClientMeasurements, m)
 				} else {
-					results[idx].Download.ServerMeasurements =
-						append(results[idx].Download.ServerMeasurements, m)
+					res[idx].ServerMeasurements =
+						append(res[idx].ServerMeasurements, m)
 				}
 			}
 		}()
 
-		go r.run(&wg, timeout, &results[i], measurements)
+		go r.run(&wg, timeout, &res[i], measurements)
 		time.Sleep(r.delay)
 	}
 
 	wg.Wait()
 	end := time.Now()
 	// Set all the results' end times to the same end time.
-	for _, r := range results {
+	for _, r := range res {
 		r.EndTime = end
 	}
 
@@ -128,7 +127,7 @@ func (r *Client) Receive(ctx context.Context) {
 		err = os.WriteFile(aggregateFile, aggregateJSON, 0644)
 		rtx.Must(err, "Could not write aggregate throughput to file")
 
-		for i, result := range results {
+		for i, result := range res {
 			filename := path.Join(outputFolder, fmt.Sprintf("%d.json", i))
 			resultJSON, err := json.Marshal(result)
 			rtx.Must(err, "Failed to marshal result")
@@ -138,8 +137,8 @@ func (r *Client) Receive(ctx context.Context) {
 	}
 }
 
-func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, result *persistence.NDT7Result,
-	measurements chan persistence.Measurement) {
+func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, result *results.NDTMResult,
+	measurements chan results.Measurement) {
 	defer wg.Done()
 	var (
 		conn *websocket.Conn
@@ -148,14 +147,12 @@ func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, result *persistenc
 	if conn, err = r.dialer(ctx, r.url); err != nil {
 		rtx.Must(err, "download dialer")
 	}
-	result.Download.StartTime = time.Now()
 
-	connInfo := &persistence.ConnectionInfo{
+	connInfo := &results.ConnectionInfo{
 		Server: conn.RemoteAddr().String(),
 		Client: conn.LocalAddr().String(),
 	}
-	if err := ndt7.Receiver(ctx, conn, connInfo, measurements); err != nil {
+	if err := ndtm.Receiver(ctx, conn, connInfo, measurements); err != nil {
 		rtx.Must(err, "download")
 	}
-	result.Download.EndTime = time.Now()
 }

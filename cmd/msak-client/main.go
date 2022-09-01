@@ -9,7 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/robertodauria/msak/client"
-	"github.com/robertodauria/msak/internal"
+	"github.com/robertodauria/msak/pkg/ndtm/spec"
 )
 
 // TODO: implement wss :)
@@ -34,8 +34,8 @@ type Result struct {
 func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 	dialer := websocket.Dialer{
 		TLSClientConfig: &tls.Config{},
-		ReadBufferSize:  internal.MaxMessageSize,
-		WriteBufferSize: internal.MaxMessageSize,
+		ReadBufferSize:  spec.MaxMessageSize,
+		WriteBufferSize: spec.MaxMessageSize,
 	}
 	headers := http.Header{}
 	headers.Add("Sec-WebSocket-Protocol", "net.measurementlab.ndt.v7")
@@ -51,7 +51,7 @@ func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 func main() {
 	flag.Parse()
 
-	downloadURL := protocol + "://" + *flagServer + internal.DownloadPath
+	downloadURL := protocol + "://" + *flagServer + spec.DownloadPath
 
 	if *flagStreams != 0 {
 		// Single run with custom number of streams

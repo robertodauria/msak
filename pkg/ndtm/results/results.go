@@ -1,4 +1,4 @@
-package persistence
+package results
 
 import (
 	"time"
@@ -7,35 +7,31 @@ import (
 	"github.com/m-lab/tcp-info/tcp"
 )
 
-// NDT7Result is the struct that is serialized as JSON to disk as the archival
-// record of an NDT7 test. This is similar to, but independent from, the NDT5Result.
-type NDT7Result struct {
+// NDTMResult is the struct that is serialized as JSON to disk as the archival
+// record of an NDT-M test.
+type NDTMResult struct {
 	// GitShortCommit is the Git commit (short form) of the running server code.
 	GitShortCommit string
 	// Version is the symbolic version (if any) of the running server code.
 	Version string
 
-	// All data members should all be self-describing. In the event of confusion,
-	// rename them to add clarity rather than adding a comment.
-	ServerIP   string
-	ServerPort int
-	ClientIP   string
-	ClientPort int
-
+	// MeasurementID identifies multiple flows belonging to the same
+	// measurement.
+	MeasurementID string
+	// UUID is the unique ID for this TCP flow.
+	UUID string
+	// StartTime is the time when the flow started. It does not include the
+	// connection setup time.
 	StartTime time.Time
-	EndTime   time.Time
-
-	// ndt7
-	Upload   *ArchivalData `json:",omitempty"`
-	Download *ArchivalData `json:",omitempty"`
-}
-
-// ArchivalData saves all instantaneous measurements over the lifetime of a test.
-type ArchivalData struct {
-	UUID               string
-	StartTime          time.Time
-	EndTime            time.Time
+	// EndTime is the time when the flow ended.
+	EndTime time.Time
+	// CongestionControl is the congestion control algorithm used by the flow.
+	CongestionControl string
+	// SubType is the subtype of the measurement (download or upload)
+	SubType string
+	// ServerMeasurements is a list of measurements taken by the server.
 	ServerMeasurements []Measurement
+	// ClientMeasurements is a list of measurements taken by the client.
 	ClientMeasurements []Measurement
 }
 

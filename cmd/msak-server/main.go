@@ -1,82 +1,72 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"flag"
-	"fmt"
 	"log"
-	"net"
 	"net/http"
+	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/m-lab/go/httpx"
 	"github.com/m-lab/go/rtx"
-	"github.com/m-lab/uuid"
-	"github.com/robertodauria/msak/internal"
-	"github.com/robertodauria/msak/internal/persistence"
-	"github.com/robertodauria/msak/ndt7"
+	"github.com/robertodauria/msak/internal/handler"
+	"github.com/robertodauria/msak/pkg/ndtm/spec"
+	"go.uber.org/zap"
 )
 
-var flagEndpointCleartext = flag.String("listen", ":8080", "Listen address/port for cleartext connections")
+var (
+	flagCertFile          = flag.String("cert", "", "The file with server certificates in PEM format.")
+	flagKeyFile           = flag.String("key", "", "The file with server key in PEM format.")
+	flagEndpoint          = flag.String("wss_addr", ":4443", "Listen address/port for TLS connections")
+	flagEndpointCleartext = flag.String("ws_addr", ":8080", "Listen address/port for cleartext connections")
+	flagDataDir           = flag.String("datadir", "./data", "Directory to store data in")
+)
+
+// httpServer creates a new *http.Server with explicit Read and Write timeouts.
+func httpServer(addr string, handler http.Handler) *http.Server {
+	tlsconf := &tls.Config{}
+	return &http.Server{
+		Addr:      addr,
+		Handler:   handler,
+		TLSConfig: tlsconf,
+		// NOTE: set absolute read and write timeouts for server connections.
+		// This prevents clients, or middleboxes, from opening a connection and
+		// holding it open indefinitely. This applies equally to TLS and non-TLS
+		// servers.
+		ReadTimeout:  time.Minute,
+		WriteTimeout: time.Minute,
+	}
+}
 
 func main() {
 	flag.Parse()
 
-	// The ndt7 listener serving up ndt7 tests, likely on standard ports.
-	ndt7Mux := http.NewServeMux()
-	ndt7Mux.Handle(internal.DownloadPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var cc string
-		cch := r.Header.Get("cc")
-		if cch == "" {
-			// defaults to bbr
-			cc = "bbr"
-		} else {
-			cc = cch
-		}
-		if conn, err := ndt7.Upgrade(w, r); err == nil {
-			const buffersize = 64 // the emitter will not wait for us
-			measurements := make(chan persistence.Measurement, buffersize)
-			go func() {
-				for m := range measurements {
-					rate := float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
-					fmt.Printf("Download rate: %v\n", rate)
-				}
-			}()
-			connInfo := getConnInfo(conn)
-			err = ndt7.Sender(r.Context(), conn, connInfo, measurements, cc)
-			if err != nil {
-				fmt.Println(err)
-			}
-		}
-	}))
-	ndt7Mux.Handle(internal.UploadPath, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if conn, err := ndt7.Upgrade(w, r); err == nil {
-			measurements := make(chan persistence.Measurement)
-			go func() {
-				for m := range measurements {
-					rate := m.AppInfo.ElapsedTime / m.AppInfo.NumBytes * 8
-					fmt.Printf("Upload rate: %v\n", rate)
-				}
-			}()
-			connInfo := getConnInfo(conn)
-			err := ndt7.Receiver(r.Context(), conn, connInfo, measurements)
-			if err != nil {
-				fmt.Println(err)
-			}
-		}
-	}))
+	logger, err := zap.NewDevelopment()
+	rtx.Must(err, "cannot initialize logger")
+	zap.ReplaceGlobals(logger)
 
-	log.Println("About to listen for ndt7 cleartext tests on " + *flagEndpointCleartext)
-	rtx.Must(http.ListenAndServe(*flagEndpointCleartext, ndt7Mux), "Could not start ndt7 cleartext server")
-}
+	// The ndtm listener serving up ndtm tests, likely on standard ports.
+	ndtmMux := http.NewServeMux()
+	ndtmHandler := handler.New(*flagDataDir)
+	ndtmMux.Handle(spec.DownloadPath, http.HandlerFunc(ndtmHandler.Download))
+	ndtmMux.Handle(spec.UploadPath, http.HandlerFunc(ndtmHandler.Upload))
+	ndtmServerCleartext := httpServer(
+		*flagEndpointCleartext,
+		ndtmMux)
 
-// Return a ConnectionInfo struct for the given websocket connection.
-func getConnInfo(conn *websocket.Conn) *persistence.ConnectionInfo {
-	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
-	// Get UUID for this TCP flow.
-	uuid, err := uuid.FromTCPConn(tcpconn)
-	rtx.Must(err, "Failed to get UUID for websocket connection")
-	return &persistence.ConnectionInfo{
-		UUID:   uuid,
-		Client: conn.RemoteAddr().String(),
-		Server: conn.RemoteAddr().String(),
+	zap.L().Sugar().Info("About to listen for ws tests on " + *flagEndpointCleartext)
+	rtx.Must(httpx.ListenAndServeAsync(ndtmServerCleartext), "Could not start cleartext server")
+
+	// Only start TLS-based services if certs and keys are provided
+	if *flagCertFile != "" && *flagKeyFile != "" {
+		ndt7Server := httpServer(
+			*flagEndpoint,
+			ndtmMux)
+		log.Println("About to listen for wss tests on " + *flagEndpoint)
+		rtx.Must(httpx.ListenAndServeTLSAsync(ndt7Server, *flagCertFile, *flagKeyFile), "Could not start TLS server")
+		defer ndt7Server.Close()
 	}
+
+	<-context.Background().Done()
 }

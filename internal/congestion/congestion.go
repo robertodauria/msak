@@ -18,6 +18,10 @@ func Set(fp *os.File, cc string) error {
 	return set(fp, cc)
 }
 
+func Get(fp *os.File) (string, error) {
+	return get(fp)
+}
+
 // GetBBRInfo obtains BBR info from |fp|.
 func GetBBRInfo(fp *os.File) (inetdiag.BBRInfo, error) {
 	return getMaxBandwidthAndMinRTT(fp)

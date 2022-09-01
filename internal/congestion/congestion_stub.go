@@ -13,6 +13,10 @@ func set(*os.File, string) error {
 	return ErrNoSupport
 }
 
+func get(*os.File) (string, error) {
+	return "", ErrNoSupport
+}
+
 func getMaxBandwidthAndMinRTT(*os.File) (inetdiag.BBRInfo, error) {
 	return inetdiag.BBRInfo{}, ErrNoSupport
 }

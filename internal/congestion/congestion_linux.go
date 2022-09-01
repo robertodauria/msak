@@ -3,6 +3,7 @@ package congestion
 // #include <linux/inet_diag.h>
 // #include <netinet/ip.h>
 // #include <netinet/tcp.h>
+// #include <stdlib.h>
 import "C"
 
 import (
@@ -12,36 +13,85 @@ import (
 	"unsafe"
 
 	"github.com/m-lab/tcp-info/inetdiag"
+	"go.uber.org/zap"
 )
 
 func set(fp *os.File, cc string) error {
-	// Note: Fd() returns uintptr but on Unix we can safely use int for sockets.
-	return syscall.SetsockoptString(int(fp.Fd()), syscall.IPPROTO_TCP,
-		syscall.TCP_CONGESTION, cc)
+	rawconn, err := fp.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var syscallErr error
+	err = rawconn.Control(func(fd uintptr) {
+		// Note: Fd() returns uintptr but on Unix we can safely use int for sockets.
+		syscallErr = syscall.SetsockoptString(int(fd), syscall.IPPROTO_TCP, syscall.TCP_CONGESTION, cc)
+	})
+	if err != nil {
+		return err
+	}
+	return syscallErr
+}
+
+func get(fp *os.File) (string, error) {
+	rawconn, err := fp.SyscallConn()
+	if err != nil {
+		return "", err
+	}
+	var syscallErr syscall.Errno
+	cc := [16]byte{}
+	cclen := len(cc)
+	err = rawconn.Control(func(fd uintptr) {
+		_, _, syscallErr = syscall.Syscall6(
+			uintptr(syscall.SYS_GETSOCKOPT),
+			fd,
+			uintptr(syscall.IPPROTO_TCP),
+			uintptr(syscall.TCP_CONGESTION),
+			uintptr(unsafe.Pointer(&cc)),
+			uintptr(unsafe.Pointer(&cclen)),
+			uintptr(0),
+		)
+	})
+	if err != nil {
+		return "", err
+	}
+	if syscallErr != 0 {
+		zap.L().Sugar().Error(syscallErr)
+		return "", syscallErr
+	}
+	return C.GoString((*C.char)(unsafe.Pointer(&cc))), nil
 }
 
 func getMaxBandwidthAndMinRTT(fp *os.File) (inetdiag.BBRInfo, error) {
 	cci := C.union_tcp_cc_info{}
 	size := uint32(C.sizeof_union_tcp_cc_info)
-	// Note: Fd() returns uintptr but on Unix we can safely use int for sockets.
-	_, _, err := syscall.Syscall6(
-		uintptr(syscall.SYS_GETSOCKOPT),
-		uintptr(int(fp.Fd())),
-		uintptr(C.IPPROTO_TCP),
-		uintptr(C.TCP_CC_INFO),
-		uintptr(unsafe.Pointer(&cci)),
-		uintptr(unsafe.Pointer(&size)),
-		uintptr(0))
 	metrics := inetdiag.BBRInfo{}
-	if err != 0 {
+	rawconn, rawConnErr := fp.SyscallConn()
+	if rawConnErr != nil {
+		return metrics, rawConnErr
+	}
+	var syscallErr syscall.Errno
+	err := rawconn.Control(func(fd uintptr) {
+		_, _, syscallErr = syscall.Syscall6(
+			uintptr(syscall.SYS_GETSOCKOPT),
+			fd,
+			uintptr(C.IPPROTO_TCP),
+			uintptr(C.TCP_CC_INFO),
+			uintptr(unsafe.Pointer(&cci)),
+			uintptr(unsafe.Pointer(&size)),
+			uintptr(0))
+	})
+	if err != nil {
+		return metrics, err
+	}
+	if syscallErr != 0 {
 		// C.get_bbr_info returns ENOSYS when the system does not support BBR. In
 		// such case let us map the error to ErrNoSupport, such that this Linux
 		// system looks like any other system where BBR is not available. This way
 		// the code for dealing with this error is not platform dependent.
-		if err == syscall.ENOSYS {
+		if syscallErr == syscall.ENOSYS {
 			return metrics, ErrNoSupport
 		}
-		return metrics, err
+		return metrics, syscallErr
 	}
 	// Apparently, tcp_bbr_info is the only congestion control data structure
 	// to occupy five 32 bit words. Currently, in September 2018, the other two
