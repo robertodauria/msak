@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -157,8 +158,9 @@ func receiver(conn *websocket.Conn, connInfo *results.ConnectionInfo, mchannel c
 
 // readcounterflow reads counter flow message and reports rates.
 // Errors are reported via errCh.
-func readcounterflow(conn *websocket.Conn, mchannel chan<- results.Measurement,
+func readcounterflow(wg *sync.WaitGroup, conn *websocket.Conn, mchannel chan<- results.Measurement,
 	errCh chan<- error) {
+	defer wg.Done()
 	conn.SetReadLimit(spec.MaxMessageSize)
 	for {
 		mtype, mdata, err := conn.ReadMessage()
@@ -196,9 +198,16 @@ func Sender(ctx context.Context, conn *websocket.Conn, connInfo *results.Connect
 	mchannel chan<- results.Measurement, cc string) error {
 	defer conn.Close() // signal child goroutines it's time to stop
 	errch := make(chan error, 2)
+	wg := &sync.WaitGroup{}
+	wg.Add(2)
+	defer func() {
+		// Make sure both goroutines are done before closing mchannel.
+		wg.Wait()
+		close(mchannel)
+	}()
 	// Process counterflow messages
-	go readcounterflow(conn, mchannel, errch)
-	go sender(conn, connInfo, mchannel, errch, cc)
+	go readcounterflow(wg, conn, mchannel, errch)
+	go sender(wg, conn, connInfo, mchannel, errch, cc)
 	var err error
 	select {
 	case <-ctx.Done():
@@ -211,8 +220,9 @@ func Sender(ctx context.Context, conn *websocket.Conn, connInfo *results.Connect
 	return err
 }
 
-func sender(conn *websocket.Conn, connInfo *results.ConnectionInfo,
+func sender(wg *sync.WaitGroup, conn *websocket.Conn, connInfo *results.ConnectionInfo,
 	mchannel chan<- results.Measurement, errch chan<- error, cc string) {
+	defer wg.Done()
 	fp, err := netx.GetFile(conn.UnderlyingConn())
 	if err != nil {
 		errch <- err

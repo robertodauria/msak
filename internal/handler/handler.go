@@ -151,7 +151,7 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 			zap.L().Sugar().Debugw("Measurement received",
 				"origin", m.Origin)
 		}
-		zap.L().Sugar().Debug("finished receiving from measurement channel")
+		zap.L().Sugar().Debug("Done receiving from measurement channel")
 	}()
 
 	// Start the sender or the receiver according to the subtest kind.
