@@ -11,8 +11,6 @@ COPY ./ ./
 
 RUN ls
 
-RUN go build -v -tags netgo -ldflags "$versionflags -extldflags \"-static\"" ./cmd/msak-client
-RUN go build -v -tags netgo -ldflags "$versionflags -extldflags \"-static\"" ./cmd/msak-server
+RUN ./build.sh
 
-CMD "./msak-server"
-
+ENTRYPOINT ["./msak-server"]
