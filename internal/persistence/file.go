@@ -7,8 +7,6 @@ import (
 	"os"
 	"path"
 	"time"
-
-	"go.uber.org/zap"
 )
 
 // DataFile is the file where we save measurements.
@@ -45,7 +43,7 @@ func newDataFile(datadir, subtest, uuid string) (*DataFile, error) {
 func New(datadir, subtest, uuid string) (*DataFile, error) {
 	file, err := newDataFile(datadir, subtest, uuid)
 	if err != nil {
-		zap.L().Sugar().Warn("newFile failed", err)
+		return nil, err
 	}
 	return file, nil
 
@@ -61,6 +59,7 @@ func (df *DataFile) Write(result interface{}) error {
 	return err
 }
 
+// Close closes the gzip writer and the file.
 func (df *DataFile) Close() error {
 	err := df.writer.Close()
 	if err != nil {
