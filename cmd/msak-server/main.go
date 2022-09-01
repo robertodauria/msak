@@ -21,6 +21,7 @@ var (
 	flagEndpoint          = flag.String("wss_addr", ":4443", "Listen address/port for TLS connections")
 	flagEndpointCleartext = flag.String("ws_addr", ":8080", "Listen address/port for cleartext connections")
 	flagDataDir           = flag.String("datadir", "./data", "Directory to store data in")
+	flagDebug             = flag.Bool("debug", false, "Enable info/debug output")
 )
 
 // httpServer creates a new *http.Server with explicit Read and Write timeouts.
@@ -42,9 +43,11 @@ func httpServer(addr string, handler http.Handler) *http.Server {
 func main() {
 	flag.Parse()
 
-	logger, err := zap.NewDevelopment()
-	rtx.Must(err, "cannot initialize logger")
-	zap.ReplaceGlobals(logger)
+	if *flagDebug {
+		logger, err := zap.NewDevelopment()
+		rtx.Must(err, "cannot initialize logger")
+		zap.ReplaceGlobals(logger)
+	}
 
 	// The ndtm listener serving up ndtm tests, likely on standard ports.
 	ndtmMux := http.NewServeMux()
