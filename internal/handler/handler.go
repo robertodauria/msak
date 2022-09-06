@@ -50,17 +50,18 @@ func (h *Handler) Upload(rw http.ResponseWriter, req *http.Request) {
 func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	req *http.Request) {
 	// Does the request include a measurement ID? If not, return.
-	// if req.URL.Query().Get("mid") == "" {
-	// 	// TODO: increase a prometheus counter here.
-	// 	zap.L().Sugar().Infow("Received request without measurement id",
-	// 		"url", req.URL.String(),
-	// 		"client", req.RemoteAddr)
-	// 	writeBadRequest(rw)
-	// 	return
-	// }
+	if req.URL.Query().Get("mid") == "" {
+		// TODO: increase a prometheus counter here.
+		zap.L().Sugar().Infow("Received request without measurement id",
+			"url", req.URL.String(),
+			"client", req.RemoteAddr)
+		writeBadRequest(rw)
+		return
+	}
+	mid := req.URL.Query().Get("mid")
 
 	// Upgrade connection to websocket.
-	zap.L().Sugar().Debug("Upgrading connection to websocket",
+	zap.L().Sugar().Debugw("Upgrading connection to websocket",
 		"url", req.URL.String(),
 		"headers", req.Header,
 	)
@@ -121,6 +122,7 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	}()
 	data.SubType = string(kind)
 	data.CongestionControl = cc
+	data.MeasurementID = mid
 
 	// Run measurement.
 	connInfo := getConnInfo(conn)

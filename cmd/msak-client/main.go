@@ -5,9 +5,12 @@ import (
 	"crypto/tls"
 	"flag"
 	"net/http"
+	"net/url"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"github.com/m-lab/go/rtx"
 	"github.com/robertodauria/msak/client"
 	"github.com/robertodauria/msak/pkg/ndtm/spec"
 )
@@ -51,18 +54,23 @@ func dialer(ctx context.Context, URL string) (*websocket.Conn, error) {
 func main() {
 	flag.Parse()
 
-	downloadURL := protocol + "://" + *flagServer + spec.DownloadPath
+	mid := uuid.New()
+	downloadURL, err := url.Parse(protocol + "://" + *flagServer + spec.DownloadPath)
+	rtx.Must(err, "cannot parse download URL")
+	q := downloadURL.Query()
+	q.Add("mid", mid.String())
+	downloadURL.RawQuery = q.Encode()
 
 	if *flagStreams != 0 {
 		// Single run with custom number of streams
-		c := client.NewWithConfig(dialer, downloadURL, *flagDuration, *flagDelay, *flagStreams, *flagOutputPrefix)
+		c := client.NewWithConfig(dialer, downloadURL.String(), *flagDuration, *flagDelay, *flagStreams, *flagOutputPrefix)
 		c.Receive(context.Background())
 		return
 	}
 
 	streams := 1
 	for streams <= maxStreams {
-		c := client.NewWithConfig(dialer, downloadURL, *flagDuration, *flagDelay, streams, *flagOutputPrefix)
+		c := client.NewWithConfig(dialer, downloadURL.String(), *flagDuration, *flagDelay, streams, *flagOutputPrefix)
 		c.Receive(context.Background())
 		streams++
 	}

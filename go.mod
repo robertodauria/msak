@@ -16,6 +16,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.1.1 // indirect
 	github.com/gocarina/gocsv v0.0.0-20220520193141-bb9bebb918c3 // indirect
 	github.com/golang/protobuf v1.4.2 // indirect
+	github.com/google/uuid v1.3.0
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
 	github.com/prometheus/client_golang v1.7.1 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
