@@ -56,10 +56,6 @@ func main() {
 	logger, err := zap.NewDevelopment()
 	rtx.Must(err, "cannot initialize logger")
 	zap.ReplaceGlobals(logger)
-	streams := 1
-	for streams <= *flagStreams {
-		c := client.NewWithConfig(*flagServer, config.New(protocol, 5*time.Second, *flagDuration, *flagDelay))
-		c.StartN(context.Background(), spec.SubtestUpload, 5, "test-mid")
-		streams++
-	}
+	c := client.NewWithConfig(*flagServer, config.New(protocol, 5*time.Second, *flagDuration, *flagDelay))
+	c.StartN(context.Background(), spec.SubtestUpload, *flagStreams, "test-mid")
 }
