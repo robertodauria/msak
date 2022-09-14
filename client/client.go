@@ -2,29 +2,41 @@ package client
 
 import (
 	"context"
-	"encoding/json"
+	"crypto/tls"
 	"errors"
-	"fmt"
-	"os"
-	"path"
+	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/m-lab/go/rtx"
+	"github.com/robertodauria/msak/client/config"
+	"github.com/robertodauria/msak/client/emitter"
 	"github.com/robertodauria/msak/pkg/ndtm"
 	"github.com/robertodauria/msak/pkg/ndtm/results"
+	"github.com/robertodauria/msak/pkg/ndtm/spec"
 )
 
 type dialerFunc func(ctx context.Context, url string) (*websocket.Conn, error)
 
+func defaultDialer(ctx context.Context, url string) (*websocket.Conn, error) {
+	dialer := websocket.Dialer{
+		TLSClientConfig: &tls.Config{},
+		ReadBufferSize:  spec.MaxMessageSize,
+		WriteBufferSize: spec.MaxMessageSize,
+	}
+	headers := http.Header{}
+	headers.Add("Sec-WebSocket-Protocol", "net.measurementlab.ndt.v7")
+	conn, _, err := dialer.DialContext(ctx, url, headers)
+	return conn, err
+}
+
 type Client struct {
-	dialer     func(ctx context.Context, url string) (*websocket.Conn, error)
-	url        string
-	duration   time.Duration
-	delay      time.Duration
-	streams    int
+	dialer     dialerFunc
+	endpoint   string
 	outputPath string
+	config     *config.ClientConfig
+	emitter    emitter.Emitter
 }
 
 const (
@@ -32,127 +44,98 @@ const (
 	DefaultDelay    = 0
 )
 
-func New(dialer dialerFunc, url string, streams int) *Client {
-	return NewWithConfig(dialer, url, DefaultDuration, DefaultDelay, streams, "")
+func New(endpoint string) *Client {
+	return NewWithConfig(endpoint, config.NewDefault())
 }
 
-func NewWithConfig(dialer dialerFunc, url string, duration time.Duration,
-	delay time.Duration, streams int, outputPath string) *Client {
+func NewWithConfig(endpoint string, config *config.ClientConfig) *Client {
 	return &Client{
-		dialer:     dialer,
-		url:        url,
-		duration:   duration,
-		delay:      delay,
-		streams:    streams,
-		outputPath: outputPath,
+		dialer:   defaultDialer,
+		endpoint: endpoint,
+		config:   config,
+		emitter:  &emitter.LogEmitter{},
 	}
 }
 
-// Receive starts nStreams streams to receive measurement data from the server.
-func (r *Client) Receive(ctx context.Context) {
-	res := make([]results.NDTMResult, r.streams)
-
-	timeout, cancel := context.WithTimeout(ctx, r.duration+time.Duration(r.streams)*r.delay)
+// StartN starts N streams to run the specified subtest.
+func (c *Client) StartN(ctx context.Context, kind spec.SubtestKind, n int, mid string) {
+	wg := &sync.WaitGroup{}
+	globalTimeout, cancel := context.WithTimeout(ctx, c.config.Duration)
 	defer cancel()
-
-	wg := sync.WaitGroup{}
-
-	avgRates := make([]float64, r.streams)
-	aggregateAvgRates := make(map[string]float64)
-	aggregateAvgRatesMutex := &sync.Mutex{}
-
-	start := time.Now()
-	// Set all the results' start times to the same start time.
-	for _, r := range res {
-		r.StartTime = start
-	}
-
-	for i := 0; i < r.streams; i++ {
+	for i := 0; i < n; i++ {
+		streamID := i
 		wg.Add(2)
+		// Make channel to handle measurements from this stream.
 		measurements := make(chan results.Measurement)
-
-		res[i].StartTime = time.Now()
-		idx := i
-
-		// Read from the measurements channel and store them in the results
-		// struct.
 		go func() {
 			defer wg.Done()
+			c.emitter.OnStart(kind, streamID)
+			c.start(globalTimeout, kind, mid, measurements)
+			c.emitter.OnComplete(kind, streamID)
+		}()
+		go func() {
+			defer wg.Done()
+			// Read the measurement channel and emit data. Stop when the channel is
+			// closed, since there are no more measurements.
 			for m := range measurements {
-				if m.Origin == "receiver" {
-					fmt.Printf("Avg rate: %v Mb/s\n", float64(m.AppInfo.NumBytes)/float64(m.AppInfo.ElapsedTime)*8)
-					// Sum the throughput for all the streams.
-					avgRates[idx] = float64(m.AppInfo.NumBytes) / float64(m.AppInfo.ElapsedTime) * 8
-					aggregateTime := time.Since(start).Seconds()
-					for j := 0; j < r.streams; j++ {
-						aggregateAvgRatesMutex.Lock()
-						aggregateAvgRates[fmt.Sprintf("%f", aggregateTime)] += avgRates[j]
-						aggregateAvgRatesMutex.Unlock()
-					}
-					res[idx].ClientMeasurements =
-						append(res[idx].ClientMeasurements, m)
-				} else {
-					res[idx].ServerMeasurements =
-						append(res[idx].ServerMeasurements, m)
-				}
+				c.emitter.OnMeasurement(kind, streamID, m)
 			}
 		}()
-
-		go r.run(&wg, timeout, &res[i], measurements)
-		time.Sleep(r.delay)
+		time.Sleep(c.config.StreamsDelay)
 	}
 
 	wg.Wait()
-	end := time.Now()
-	// Set all the results' end times to the same end time.
-	for _, r := range res {
-		r.EndTime = end
-	}
+}
 
-	fmt.Printf("Completed (%d streams):\n", r.streams)
-
-	// Write each stream's result to outputPath/<nstreams>/<uuid>.json.
-	if r.outputPath != "" {
-		outputFolder := path.Join(r.outputPath, fmt.Sprintf("%d", r.streams))
-		// Create the full output path if it doesn't exist.
-		if _, err := os.Stat(outputFolder); errors.Is(err, os.ErrNotExist) {
-			err := os.MkdirAll(outputFolder, os.ModePerm)
-			rtx.Must(err, "Could not create output directory")
-		}
-
-		// Write aggregate throughput.
-		aggregateJSON, err := json.Marshal(aggregateAvgRates)
-		rtx.Must(err, "Could not marshal aggregate throughput")
-		aggregateFile := path.Join(outputFolder, "aggregate.json")
-		err = os.WriteFile(aggregateFile, aggregateJSON, 0644)
-		rtx.Must(err, "Could not write aggregate throughput to file")
-
-		for i, result := range res {
-			filename := path.Join(outputFolder, fmt.Sprintf("%d.json", i))
-			resultJSON, err := json.Marshal(result)
-			rtx.Must(err, "Failed to marshal result")
-			err = os.WriteFile(filename, resultJSON, 0644)
-			rtx.Must(err, "Failed to write result to disk")
-		}
+func (r *Client) start(ctx context.Context, subtest spec.SubtestKind,
+	mid string, measurements chan results.Measurement) error {
+	switch subtest {
+	case spec.SubtestDownload:
+		return r.runDownload(ctx, mid, measurements)
+	case spec.SubtestUpload:
+		return r.runUpload(ctx, mid, measurements)
+	default:
+		return errors.New("invalid subtest")
 	}
 }
 
-func (r *Client) run(wg *sync.WaitGroup, ctx context.Context, result *results.NDTMResult,
-	measurements chan results.Measurement) {
-	defer wg.Done()
-	var (
-		conn *websocket.Conn
-		err  error
-	)
-	if conn, err = r.dialer(ctx, r.url); err != nil {
-		rtx.Must(err, "download dialer")
+func (r *Client) runDownload(ctx context.Context, mid string, measurements chan results.Measurement) error {
+	var conn *websocket.Conn
+	mURL, err := url.Parse(string(r.config.Protocol) + "://" + r.endpoint +
+		spec.DownloadPath + "?mid=" + mid)
+	if err != nil {
+		return err
 	}
-
+	if conn, err = r.dialer(ctx, mURL.String()); err != nil {
+		return err
+	}
 	connInfo := &results.ConnectionInfo{
 		Server: conn.RemoteAddr().String(),
 		Client: conn.LocalAddr().String(),
 	}
 	if err := ndtm.Receiver(ctx, conn, connInfo, measurements); err != nil {
-		rtx.Must(err, "download")
+		return err
 	}
+	return nil
+}
+
+func (r *Client) runUpload(ctx context.Context, mid string, measurements chan results.Measurement) error {
+	var conn *websocket.Conn
+	// TODO: get the mid from Locate.
+	mURL, err := url.Parse(string(r.config.Protocol) + "://" + r.endpoint +
+		spec.UploadPath + "?mid=" + mid)
+	if err != nil {
+		return err
+	}
+	if conn, err = r.dialer(ctx, mURL.String()); err != nil {
+		return err
+	}
+	connInfo := &results.ConnectionInfo{
+		Server: conn.RemoteAddr().String(),
+		Client: conn.LocalAddr().String(),
+	}
+	if err := ndtm.Sender(ctx, conn, connInfo, measurements); err != nil {
+		return err
+	}
+	return nil
 }

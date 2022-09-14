@@ -158,7 +158,7 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 
 	// Start the sender or the receiver according to the subtest kind.
 	if kind == spec.SubtestDownload {
-		ndtm.Sender(ctx, conn, connInfo, measurements, "bbr")
+		ndtm.Sender(ctx, conn, connInfo, measurements)
 	} else {
 		ndtm.Receiver(ctx, conn, connInfo, measurements)
 	}

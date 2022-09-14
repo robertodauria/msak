@@ -20,6 +20,7 @@ import (
 	"github.com/robertodauria/msak/internal/tcpinfox"
 	"github.com/robertodauria/msak/pkg/ndtm/results"
 	"github.com/robertodauria/msak/pkg/ndtm/spec"
+	"go.uber.org/zap"
 )
 
 var errNonTextMessage = errors.New("not a text message")
@@ -195,33 +196,36 @@ func readcounterflow(wg *sync.WaitGroup, conn *websocket.Conn, mchannel chan<- r
 // The context drives how long the connection lasts. If the context is canceled
 // or there is an error, the connection and the rates channel are closed.
 func Sender(ctx context.Context, conn *websocket.Conn, connInfo *results.ConnectionInfo,
-	mchannel chan<- results.Measurement, cc string) error {
-	defer conn.Close() // signal child goroutines it's time to stop
+	mchannel chan<- results.Measurement) error {
 	errch := make(chan error, 2)
 	wg := &sync.WaitGroup{}
 	wg.Add(2)
 	defer func() {
+		conn.Close()
 		// Make sure both goroutines are done before closing mchannel.
 		wg.Wait()
 		close(mchannel)
 	}()
 	// Process counterflow messages
 	go readcounterflow(wg, conn, mchannel, errch)
-	go sender(wg, conn, connInfo, mchannel, errch, cc)
-	var err error
+	zap.L().Sugar().Debug("started readcounterflow")
+	go sender(wg, conn, connInfo, mchannel, errch)
+	zap.L().Sugar().Debug("started sender")
 	select {
 	case <-ctx.Done():
+		zap.L().Sugar().Debug("ctx done")
 		return nil
-	case err = <-errch:
+	case err := <-errch:
+		zap.L().Sugar().Debugf("received err (%s) from errch", err.Error())
 		if websocket.IsUnexpectedCloseError(err, websocket.CloseAbnormalClosure, websocket.CloseGoingAway) {
 			return err
 		}
+		return nil
 	}
-	return err
 }
 
 func sender(wg *sync.WaitGroup, conn *websocket.Conn, connInfo *results.ConnectionInfo,
-	mchannel chan<- results.Measurement, errch chan<- error, cc string) {
+	mchannel chan<- results.Measurement, errch chan<- error) {
 	defer wg.Done()
 	fp, err := netx.GetFile(conn.UnderlyingConn())
 	if err != nil {
