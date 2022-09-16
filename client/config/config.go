@@ -2,43 +2,44 @@ package config
 
 import "time"
 
-type DialerProtocol string
+type DialerScheme string
 
 const (
-	WebSocketSecure DialerProtocol = "wss"
-	WebSocket                      = "ws"
+	WebSocketSecure DialerScheme = "wss"
+	WebSocket                    = "ws"
 )
 
 const (
-	DefaultProtocol     = WebSocketSecure
-	DefaultTimeout      = 10 * time.Second
-	DefaultDuration     = 10 * time.Second
-	DefaultStreamsDelay = 0
+	defaultScheme      = WebSocketSecure
+	defaultDuration    = 10 * time.Second
+	defaultStreamDelay = 0
 )
 
 type ClientConfig struct {
-	// The protocol to use (ws/wss).
-	Protocol DialerProtocol
-
-	// The connection Timeout.
-	Timeout time.Duration
+	// The scheme to use (ws/wss).
+	Scheme DialerScheme
 
 	// The default Duration of a measurement.
 	Duration time.Duration
 
 	// The delay between stream starts.
 	StreamsDelay time.Duration
+
+	// Ignore invalid TLS certs.
+	NoVerify bool
+
+	// Congestion control algorithm to request to the server.
+	CongestionControl string
 }
 
-func New(proto DialerProtocol, timeout, duration, delay time.Duration) *ClientConfig {
+func New(scheme DialerScheme, duration, delay time.Duration) *ClientConfig {
 	return &ClientConfig{
-		Protocol:     proto,
-		Timeout:      timeout,
+		Scheme:       scheme,
 		Duration:     duration,
 		StreamsDelay: delay,
 	}
 }
 
 func NewDefault() *ClientConfig {
-	return New(DefaultProtocol, DefaultTimeout, DefaultDuration, DefaultStreamsDelay)
+	return New(defaultScheme, defaultDuration, defaultStreamDelay)
 }

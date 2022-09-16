@@ -59,6 +59,8 @@ type ConnectionInfo struct {
 	Client string
 	Server string
 	UUID   string `json:",omitempty"`
+	// CC is the congestion algorithm used by the sender of this struct.
+	CC string
 }
 
 // The BBRInfo struct contains information measured using BBR. This structure is
