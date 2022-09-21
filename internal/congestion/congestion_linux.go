@@ -7,7 +7,6 @@ package congestion
 import "C"
 
 import (
-	"fmt"
 	"math"
 	"os"
 	"syscall"
@@ -59,7 +58,6 @@ func get(fp *os.File) (string, error) {
 		zap.L().Sugar().Error(syscallErr)
 		return "", syscallErr
 	}
-	fmt.Println(string(cc[:]))
 	return C.GoString((*C.char)(unsafe.Pointer(&cc))), nil
 }
 

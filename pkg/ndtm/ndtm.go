@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/m-lab/go/rtx"
 	"github.com/robertodauria/msak/internal/congestion"
 	"github.com/robertodauria/msak/internal/netx"
 	"github.com/robertodauria/msak/internal/tcpinfox"
@@ -147,7 +145,6 @@ func receiver(conn *websocket.Conn, connInfo *results.ConnectionInfo, mchannel c
 				Origin:         "receiver",
 			}
 
-			emit(&m, "receiver")
 			conn.WriteJSON(m)
 			// Send measurement over the mchannel channel.
 			mchannel <- m
@@ -298,10 +295,4 @@ func sender(wg *sync.WaitGroup, conn *websocket.Conn, connInfo *results.Connecti
 			return
 		}
 	}
-}
-
-func emit(m *results.Measurement, testname string) {
-	b, err := json.Marshal(*m)
-	rtx.Must(err, "marshal measurement")
-	fmt.Printf("%s: %s\n", testname, string(b))
 }

@@ -37,10 +37,13 @@ type Client struct {
 	outputPath string
 	config     *config.ClientConfig
 	emitter    emitter.Emitter
+
+	startTime      time.Time
+	bytesPerStream []int64
 }
 
 const (
-	DefaultDuration = 5 * time.Second
+	DefaultDuration = 10 * time.Second
 	DefaultDelay    = 0
 )
 
@@ -71,15 +74,40 @@ func (c *Client) SetEmitter(e emitter.Emitter) {
 	c.emitter = e
 }
 
+func (c *Client) measurer(ctx context.Context, streamID int, kind spec.SubtestKind,
+	measurement chan results.Measurement) {
+	// read from the measurement channel, keep track of total bytes
+	// sent/received and total elapsed time, display aggregate throughput.
+	// Stop when the channel is closed by the sender.
+	for m := range measurement {
+		if m.Origin != "receiver" {
+			continue
+		}
+		// update stream bytes and runtime.
+		c.bytesPerStream[streamID] = m.AppInfo.NumBytes
+		zap.L().Sugar().Debugw("measurement", "id", streamID, "NumBytes",
+			m.AppInfo.NumBytes, "goodput", float64(m.AppInfo.NumBytes)/float64(m.AppInfo.ElapsedTime)*8)
+		// aggregate throughput.
+		sum := 0
+		for _, b := range c.bytesPerStream {
+			sum += int(b)
+		}
+		zap.L().Sugar().Infof("aggregate goodput: %f", float64(sum)/float64(time.Since(c.startTime).Seconds())*8/1000000)
+	}
+}
+
 // StartN starts N streams to run the specified subtest.
 func (c *Client) StartN(ctx context.Context, kind spec.SubtestKind, n int, mid string) {
 	wg := &sync.WaitGroup{}
+	c.bytesPerStream = make([]int64, n)
 	globalTimeout, cancel := context.WithTimeout(ctx, c.config.Duration)
 	defer cancel()
+	// set the global startTime for this measurement.
+	c.startTime = time.Now()
 	for i := 0; i < n; i++ {
 		streamID := i
 		wg.Add(2)
-		// Make channel to handle measurements from this stream.
+		// channel to handle measurements from this stream.
 		measurements := make(chan results.Measurement)
 		go func() {
 			defer wg.Done()
@@ -93,11 +121,7 @@ func (c *Client) StartN(ctx context.Context, kind spec.SubtestKind, n int, mid s
 		}()
 		go func() {
 			defer wg.Done()
-			// Read the measurement channel and emit data. Stop when the channel is
-			// closed, since there are no more measurements.
-			for m := range measurements {
-				c.emitter.OnMeasurement(kind, streamID, m)
-			}
+			c.measurer(ctx, streamID, kind, measurements)
 		}()
 		time.Sleep(c.config.StreamsDelay)
 	}

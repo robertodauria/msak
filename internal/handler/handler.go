@@ -104,8 +104,6 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 		return
 	}
 
-	zap.L().Sugar().Debugf("cc: |%s|", cc)
-
 	// Create measurement archival data.
 	data, err := createResult(conn)
 	if err != nil {
