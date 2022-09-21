@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"os"
 	"time"
 
 	"github.com/m-lab/go/rtx"
@@ -36,6 +37,11 @@ func main() {
 	logger, err := zap.NewDevelopment()
 	rtx.Must(err, "cannot initialize logger")
 	zap.ReplaceGlobals(logger)
+
+	if float64(*flagStreams-1)*flagDelay.Seconds() >= flagDuration.Seconds() {
+		zap.L().Sugar().Error("Invalid configuration: please check streams, delay and duration and make sure they make sense.")
+		os.Exit(1)
+	}
 	c := client.NewWithConfig(*flagServer, config.New(protocol, *flagDuration, *flagDelay))
 	c.StartN(context.Background(), spec.SubtestDownload, *flagStreams, "test-mid")
 }
