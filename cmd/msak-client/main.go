@@ -18,12 +18,11 @@ const protocol = "ws"
 const maxStreams = 3
 
 var (
-	flagServer       = flag.String("server", "localhost:8080", "Server address")
-	flagStreams      = flag.Int("streams", 1, "Number of streams")
-	flagCC           = flag.String("cc", "default", "Congestion control algorithm to use")
-	flagDelay        = flag.Duration("delay", 0, "Delay between each stream")
-	flagDuration     = flag.Duration("duration", 10*time.Second, "Length of the last stream")
-	flagOutputPrefix = flag.String("output", "results", "Output file prefix")
+	flagServer   = flag.String("server", "localhost:8080", "Server address")
+	flagStreams  = flag.Int("streams", 1, "Number of streams")
+	flagCC       = flag.String("cc", "default", "Congestion control algorithm to use")
+	flagDelay    = flag.Duration("delay", 0, "Delay between each stream")
+	flagDuration = flag.Duration("duration", 10*time.Second, "Length of the last stream")
 )
 
 type Result struct {
