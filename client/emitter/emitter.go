@@ -23,11 +23,11 @@ func (e *LogEmitter) OnMeasurement(kind spec.SubtestKind, n int, m results.Measu
 }
 
 func (e *LogEmitter) OnError(kind spec.SubtestKind, err error) {
-	zap.L().Sugar().Errorf("%s: OnError (%v)", kind, err)
+	zap.L().Sugar().Errorf("%s: error (%v)", kind, err)
 }
 func (e *LogEmitter) OnStart(kind spec.SubtestKind, n int) {
-	zap.L().Sugar().Infof("%s: OnStart", kind)
+	zap.L().Sugar().Infof("%s: starting stream #%d", kind, n)
 }
 func (e *LogEmitter) OnComplete(kind spec.SubtestKind, n int) {
-	zap.L().Sugar().Infof("%s: OnComplete", kind)
+	zap.L().Sugar().Infof("%s: completed stream #%d", kind, n)
 }
