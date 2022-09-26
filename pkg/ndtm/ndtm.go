@@ -7,7 +7,6 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -80,8 +79,7 @@ func Receiver(ctx context.Context, conn *websocket.Conn, connInfo *results.Conne
 func receiver(conn *websocket.Conn, connInfo *results.ConnectionInfo, mchannel chan<- results.Measurement,
 	errch chan<- error) {
 	defer close(mchannel)
-	tcpconn := conn.UnderlyingConn().(*net.TCPConn)
-	fp, err := tcpconn.File()
+	fp, err := netx.GetFile(conn.UnderlyingConn())
 	if err != nil {
 		errch <- err
 		return
