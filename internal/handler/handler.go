@@ -50,7 +50,8 @@ func (h *Handler) Upload(rw http.ResponseWriter, req *http.Request) {
 func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	req *http.Request) {
 	// Does the request include a measurement ID? If not, return.
-	if req.URL.Query().Get("mid") == "" {
+	mid := req.URL.Query().Get("mid")
+	if mid == "" {
 		// TODO: increase a prometheus counter here.
 		zap.L().Sugar().Infow("Received request without measurement id",
 			"url", req.URL.String(),
@@ -58,7 +59,12 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 		writeBadRequest(rw)
 		return
 	}
-	mid := req.URL.Query().Get("mid")
+
+	// Does the request include a custom cc? If not, use BBR.
+	requestCC := req.URL.Query().Get("cc")
+	if requestCC == "" {
+		requestCC = "bbr"
+	}
 
 	// Upgrade connection to websocket.
 	zap.L().Sugar().Debugw("Upgrading connection to websocket",
@@ -81,15 +87,14 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 		conn.Close()
 	}()
 
-	// Set congestion control algorithm for this connection to "bbr".
-	// TODO: make it configurable.
+	// Set congestion control algorithm for this connection.
 	fp, err := netx.GetFile(conn.UnderlyingConn())
 	if err != nil {
 		zap.L().Sugar().Error("Cannot get the connection's fp: %s", err)
 	}
-	err = congestion.Set(fp, "bbr")
+	err = congestion.Set(fp, requestCC)
 	if err != nil {
-		zap.L().Sugar().Error("Cannot enable BBR: %s", err)
+		zap.L().Sugar().Errorf("Cannot enable cc %s: %s", requestCC, err)
 		// In case of failure, we still want to continue the measurement with
 		// the current cc as long as we know what it is -- see below.
 	}
@@ -103,6 +108,7 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 		zap.L().Sugar().Errorf("Cannot get cc from conn: %s", err)
 		return
 	}
+	zap.L().Sugar().Debug("cc: ", cc)
 
 	// Create measurement archival data.
 	data, err := createResult(conn)

@@ -77,7 +77,7 @@ func (c *Client) SetEmitter(e emitter.Emitter) {
 func (c *Client) measurer(ctx context.Context, streamID int, kind spec.SubtestKind,
 	measurement chan results.Measurement) {
 	// read from the measurement channel, keep track of total bytes
-	// sent/received and total elapsed time, display aggregate throughput.
+	// sent/received and total elapsed time, display aggregate goodput.
 	// Stop when the channel is closed by the sender.
 	for m := range measurement {
 		if m.Origin != "receiver" {

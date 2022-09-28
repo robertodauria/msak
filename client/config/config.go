@@ -13,6 +13,7 @@ const (
 	defaultScheme      = WebSocketSecure
 	defaultDuration    = 10 * time.Second
 	defaultStreamDelay = 0
+	defaultCC          = "bbr"
 )
 
 type ClientConfig struct {
@@ -32,14 +33,15 @@ type ClientConfig struct {
 	CongestionControl string
 }
 
-func New(scheme DialerScheme, duration, delay time.Duration) *ClientConfig {
+func New(scheme DialerScheme, duration, delay time.Duration, cc string) *ClientConfig {
 	return &ClientConfig{
-		Scheme:       scheme,
-		Duration:     duration,
-		StreamsDelay: delay,
+		Scheme:            scheme,
+		Duration:          duration,
+		StreamsDelay:      delay,
+		CongestionControl: cc,
 	}
 }
 
 func NewDefault() *ClientConfig {
-	return New(defaultScheme, defaultDuration, defaultStreamDelay)
+	return New(defaultScheme, defaultDuration, defaultStreamDelay, defaultCC)
 }
