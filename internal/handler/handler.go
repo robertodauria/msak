@@ -8,7 +8,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/go/prometheusx"
-	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/uuid"
 	"github.com/robertodauria/msak/internal/congestion"
@@ -100,7 +99,7 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	}
 	err = congestion.Set(fp, requestCC)
 	if err != nil {
-		zap.L().Sugar().Errorf("Cannot enable cc %s: %s", requestCC, err)
+		zap.L().Sugar().Errorf("Cannot enable cc %s: %v", requestCC, err)
 		// In case of failure, we still want to continue the measurement with
 		// the current cc as long as we know what it is -- see below.
 	}
@@ -108,16 +107,14 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	// Get the cc algorithm from the socket. This makes sure we set it
 	// correctly in the result struct. A failure here prevents the measurement
 	// from starting.
-	cc, err := congestion.Get(fp)
+	connInfo, err := getConnInfo(conn)
 	if err != nil {
-		// TODO: increase a prometheus counter.
-		zap.L().Sugar().Errorf("Cannot get cc from conn: %s", err)
-		return
+		zap.L().Sugar().Error("Cannot get connection info: ", err)
 	}
-	zap.L().Sugar().Debug("cc: ", cc)
+	zap.L().Sugar().Debug("cc: ", connInfo.CC)
 
 	// Create measurement archival data.
-	data, err := createResult(conn)
+	data, err := createResult(connInfo.UUID)
 	if err != nil {
 		// TODO: increase a prometheus counter.
 		zap.L().Sugar().Warn("Cannot create result", err)
@@ -131,11 +128,10 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 		h.writeResult(data.UUID, kind, data)
 	}()
 	data.SubType = string(kind)
-	data.CongestionControl = cc
+	data.CongestionControl = connInfo.CC
 	data.MeasurementID = mid
 
 	// Run measurement.
-	connInfo := getConnInfo(conn)
 	measurements := make(chan results.Measurement, 64)
 
 	// Drain the measurement channel and append the measurement to the correct
@@ -174,12 +170,11 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	}
 }
 
-func createResult(conn *websocket.Conn) (*results.NDTMResult, error) {
-	info := getConnInfo(conn)
+func createResult(connUUID string) (*results.NDTMResult, error) {
 	return &results.NDTMResult{
 		GitShortCommit: prometheusx.GitShortCommit,
 		Version:        "0", // XXX
-		UUID:           info.UUID,
+		UUID:           connUUID,
 	}, nil
 }
 
@@ -196,17 +191,26 @@ func (h Handler) writeResult(uuid string, kind spec.SubtestKind, result *results
 }
 
 // Return a ConnectionInfo struct for the given websocket connection.
-func getConnInfo(conn *websocket.Conn) *results.ConnectionInfo {
+func getConnInfo(conn *websocket.Conn) (*results.ConnectionInfo, error) {
 	fp, err := netx.GetFile(conn.UnderlyingConn())
-	rtx.Must(err, "Failed to get fp for the websocket conn")
+	if err != nil {
+		return nil, err
+	}
+	cc, err := congestion.Get(fp)
+	if err != nil {
+		return nil, err
+	}
 	// Get UUID for this TCP flow.
 	uuid, err := uuid.FromFile(fp)
-	rtx.Must(err, "Failed to get UUID for the websocket conn")
+	if err != nil {
+		return nil, err
+	}
 	return &results.ConnectionInfo{
 		UUID:   uuid,
 		Client: conn.RemoteAddr().String(),
 		Server: conn.RemoteAddr().String(),
-	}
+		CC:     cc,
+	}, nil
 }
 
 func getMIDFromRequest(req *http.Request) (string, error) {
