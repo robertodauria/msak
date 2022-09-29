@@ -49,16 +49,18 @@ func (h *Handler) Upload(rw http.ResponseWriter, req *http.Request) {
 
 func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	req *http.Request) {
-	// Does the request include a measurement ID? If not, return.
-	mid := req.URL.Query().Get("mid")
+	// Does the request include an access token? If not, return.
+	mid := req.URL.Query().Get("access_token")
 	if mid == "" {
 		// TODO: increase a prometheus counter here.
-		zap.L().Sugar().Infow("Received request without measurement id",
+		zap.L().Sugar().Infow("Received request without access token",
 			"url", req.URL.String(),
 			"client", req.RemoteAddr)
 		writeBadRequest(rw)
 		return
 	}
+
+	// Validate the
 
 	// Does the request include a custom cc? If not, use BBR.
 	requestCC := req.URL.Query().Get("cc")

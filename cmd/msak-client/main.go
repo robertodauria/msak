@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/m-lab/go/rtx"
 	"github.com/robertodauria/msak/client"
 	"github.com/robertodauria/msak/client/config"
@@ -33,5 +34,5 @@ func main() {
 		os.Exit(1)
 	}
 	c := client.NewWithConfig(*flagServer, config.New(config.DialerScheme(*flagScheme), *flagDuration, *flagDelay, *flagCC))
-	c.StartN(context.Background(), spec.SubtestDownload, *flagStreams, "test-mid")
+	c.StartN(context.Background(), spec.SubtestDownload, *flagStreams, uuid.NewString())
 }
