@@ -32,11 +32,11 @@ func (c *Client) defaultDialer(ctx context.Context, url string) (*websocket.Conn
 }
 
 type Client struct {
-	dialer     *websocket.Dialer
-	endpoint   string
-	outputPath string
-	config     *config.ClientConfig
-	emitter    emitter.Emitter
+	dialer    *websocket.Dialer
+	endpoint  string
+	locateURL *url.URL
+	config    *config.ClientConfig
+	emitter   emitter.Emitter
 
 	startTime      time.Time
 	bytesPerStream []int64
@@ -48,19 +48,20 @@ const (
 )
 
 func New(endpoint string) *Client {
-	return NewWithConfig(endpoint, &config.ClientConfig{
+	return NewWithConfig(endpoint, nil, &config.ClientConfig{
 		Scheme:       config.WebSocketSecure,
 		Duration:     DefaultDuration,
 		StreamsDelay: DefaultDelay,
 	})
 }
 
-func NewWithConfig(endpoint string, conf *config.ClientConfig) *Client {
+func NewWithConfig(endpoint string, locateURL *url.URL, conf *config.ClientConfig) *Client {
 	c := &Client{
-		dialer:   websocket.DefaultDialer,
-		endpoint: endpoint,
-		config:   conf,
-		emitter:  &emitter.LogEmitter{},
+		dialer:    websocket.DefaultDialer,
+		endpoint:  endpoint,
+		locateURL: locateURL,
+		config:    conf,
+		emitter:   &emitter.LogEmitter{},
 	}
 	if conf.Scheme == config.WebSocketSecure {
 		c.dialer.TLSClientConfig = &tls.Config{
@@ -148,9 +149,12 @@ func (c *Client) runDownload(ctx context.Context, mid string, measurements chan 
 		return err
 	}
 	params := mURL.Query()
-	params.Add("mid", mid)
+	if c.locateURL == nil {
+		params.Add("mid", mid)
+	}
 	params.Add("cc", c.config.CongestionControl)
 	mURL.RawQuery = params.Encode()
+	zap.L().Sugar().Debug("Connecting to ", mURL.String())
 	if conn, err = c.defaultDialer(ctx, mURL.String()); err != nil {
 		close(measurements)
 		return err
@@ -180,7 +184,9 @@ func (c *Client) runUpload(ctx context.Context, mid string, measurements chan re
 		return err
 	}
 	params := mURL.Query()
-	params.Add("mid", mid)
+	if c.locateURL == nil {
+		params.Add("mid", mid)
+	}
 	params.Add("cc", c.config.CongestionControl)
 	mURL.RawQuery = params.Encode()
 	if conn, err = c.defaultDialer(ctx, mURL.String()); err != nil {

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -17,7 +18,10 @@ import (
 	"github.com/robertodauria/msak/pkg/ndtm/results"
 	"github.com/robertodauria/msak/pkg/ndtm/spec"
 	"go.uber.org/zap"
+	"gopkg.in/square/go-jose.v2/jwt"
 )
+
+var ErrNoMeasurementID = errors.New("no measurement ID specified in the request")
 
 // Handler handles the msak subtests.
 type Handler struct {
@@ -49,18 +53,18 @@ func (h *Handler) Upload(rw http.ResponseWriter, req *http.Request) {
 
 func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	req *http.Request) {
-	// Does the request include an access token? If not, return.
-	mid := req.URL.Query().Get("access_token")
-	if mid == "" {
-		// TODO: increase a prometheus counter here.
-		zap.L().Sugar().Infow("Received request without access token",
+	// Does the request include a mesaurement id? If not, return.
+	mid, err := getMIDFromRequest(req)
+	if err != nil {
+		zap.L().Sugar().Infow("Received request without measurement id",
 			"url", req.URL.String(),
-			"client", req.RemoteAddr)
+			"client", req.RemoteAddr,
+			"error", err)
 		writeBadRequest(rw)
 		return
 	}
 
-	// Validate the
+	zap.L().Sugar().Debug("mid: ", mid)
 
 	// Does the request include a custom cc? If not, use BBR.
 	requestCC := req.URL.Query().Get("cc")
@@ -203,4 +207,38 @@ func getConnInfo(conn *websocket.Conn) *results.ConnectionInfo {
 		Client: conn.RemoteAddr().String(),
 		Server: conn.RemoteAddr().String(),
 	}
+}
+
+func getMIDFromRequest(req *http.Request) (string, error) {
+	// A measurement ID can be specified in two way: via a "mid" querystring
+	// parameter (when access tokens are not required) or via the ID field
+	// in the JWT access token.
+	// Get the mid from the querystring if available.
+	if mid := req.URL.Query().Get("mid"); mid != "" {
+		return mid, nil
+	}
+
+	// Get the mid from the access token.
+	token := req.URL.Query().Get("access_token")
+	if token == "" {
+		return "", ErrNoMeasurementID
+	}
+
+	// Attempt to parse the access token as a JWT token.
+	jwtToken, err := jwt.ParseSigned(token)
+	if err != nil {
+		return "", err
+	}
+
+	// Access tokens' validity is verified by the access middleware, so we
+	// don't verify it again here. We only extract the claims to get the ID.
+	claims := &jwt.Claims{}
+	err = jwtToken.UnsafeClaimsWithoutVerification(claims)
+	if err != nil {
+		return "", err
+	}
+
+	// Return the ID as mid.
+	return claims.ID, nil
+
 }

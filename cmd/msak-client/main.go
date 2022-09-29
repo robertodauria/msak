@@ -33,6 +33,7 @@ func main() {
 		zap.L().Sugar().Error("Invalid configuration: please check streams, delay and duration and make sure they make sense.")
 		os.Exit(1)
 	}
-	c := client.NewWithConfig(*flagServer, config.New(config.DialerScheme(*flagScheme), *flagDuration, *flagDelay, *flagCC))
+	c := client.NewWithConfig(*flagServer, nil,
+		config.New(config.DialerScheme(*flagScheme), *flagDuration, *flagDelay, *flagCC))
 	c.StartN(context.Background(), spec.SubtestDownload, *flagStreams, uuid.NewString())
 }
