@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/m-lab/access/controller"
 	"github.com/m-lab/go/prometheusx"
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/uuid"
@@ -17,7 +18,6 @@ import (
 	"github.com/robertodauria/msak/pkg/ndtm/results"
 	"github.com/robertodauria/msak/pkg/ndtm/spec"
 	"go.uber.org/zap"
-	"gopkg.in/square/go-jose.v2/jwt"
 )
 
 var ErrNoMeasurementID = errors.New("no measurement ID specified in the request")
@@ -52,7 +52,7 @@ func (h *Handler) Upload(rw http.ResponseWriter, req *http.Request) {
 
 func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 	req *http.Request) {
-	// Does the request include a mesaurement id? If not, return.
+	// Does the request include a measurement id? If not, return.
 	mid, err := getMIDFromRequest(req)
 	if err != nil {
 		zap.L().Sugar().Infow("Received request without measurement id",
@@ -213,36 +213,25 @@ func getConnInfo(conn *websocket.Conn) (*results.ConnectionInfo, error) {
 	}, nil
 }
 
+// getMIDFromRequest extracts the measurement id ("mid") from a given HTTP
+// request, if present.
+//
+// A measurement ID can be specified in two ways: via a "mid" querystring
+// parameter (when access tokens are not required) or via the ID field
+// in the JWT access token.
 func getMIDFromRequest(req *http.Request) (string, error) {
-	// A measurement ID can be specified in two way: via a "mid" querystring
-	// parameter (when access tokens are not required) or via the ID field
-	// in the JWT access token.
-	// Get the mid from the querystring if available.
+
+	// If the request includes a valid JWT token, the claim and the ID are in
+	// the request's context already.
+	claims := controller.GetClaim(req.Context())
+	if claims != nil {
+		return claims.ID, nil
+	}
+
+	// Otherwise, get the mid from the querystring.
 	if mid := req.URL.Query().Get("mid"); mid != "" {
 		return mid, nil
 	}
 
-	// Get the mid from the access token.
-	token := req.URL.Query().Get("access_token")
-	if token == "" {
-		return "", ErrNoMeasurementID
-	}
-
-	// Attempt to parse the access token as a JWT token.
-	jwtToken, err := jwt.ParseSigned(token)
-	if err != nil {
-		return "", err
-	}
-
-	// Access tokens' validity is verified by the access middleware, so we
-	// don't verify it again here. We only extract the claims to get the ID.
-	claims := &jwt.Claims{}
-	err = jwtToken.UnsafeClaimsWithoutVerification(claims)
-	if err != nil {
-		return "", err
-	}
-
-	// Return the ID as mid.
-	return claims.ID, nil
-
+	return "", errors.New("no valid JWT token or mid")
 }
