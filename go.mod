@@ -9,12 +9,12 @@ require (
 	github.com/m-lab/tcp-info v1.5.3
 	github.com/m-lab/uuid v0.0.0-20191115203855-549727171666
 	go.uber.org/zap v1.23.0
-	gopkg.in/square/go-jose.v2 v2.6.0
 )
 
 require (
 	github.com/justinas/alice v1.2.0 // indirect
 	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9 // indirect
+	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 )
 
 require (
