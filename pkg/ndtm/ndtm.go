@@ -36,13 +36,12 @@ func makePreparedMessage(size int) (*websocket.PreparedMessage, error) {
 // Upgrade upgrades the HTTP connection to WebSockets.
 // Returns the upgraded websocket.Conn.
 func Upgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
-	const proto = "net.measurementlab.ndt.v7"
-	if r.Header.Get("Sec-WebSocket-Protocol") != proto {
+	if r.Header.Get("Sec-WebSocket-Protocol") != spec.SecWebSocketProtocol {
 		w.WriteHeader(http.StatusBadRequest)
 		return nil, errors.New("missing Sec-WebSocket-Protocol header")
 	}
 	h := http.Header{}
-	h.Add("Sec-WebSocket-Protocol", proto)
+	h.Add("Sec-WebSocket-Protocol", spec.SecWebSocketProtocol)
 	u := websocket.Upgrader{
 		// Allow cross-origin resource sharing.
 		CheckOrigin: func(r *http.Request) bool {

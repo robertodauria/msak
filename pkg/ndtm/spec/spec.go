@@ -12,6 +12,9 @@ const (
 	UploadPath   = "/ndt/v7/upload"
 
 	MaxRuntime = 15 * time.Second
+
+	// SecWebSocketProtocol is the value of the Sec-WebSocket-Protocol header.
+	SecWebSocketProtocol = "net.measurementlab.ndt.m"
 )
 
 // SubtestKind indicates the subtest kind

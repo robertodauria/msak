@@ -27,8 +27,8 @@ type NDTMResult struct {
 	EndTime time.Time
 	// CongestionControl is the congestion control algorithm used by the flow.
 	CongestionControl string
-	// SubType is the subtype of the measurement (download or upload)
-	SubType string
+	// SubTest is the subtest of the measurement (download or upload)
+	SubTest string
 	// ServerMeasurements is a list of measurements taken by the server.
 	ServerMeasurements []Measurement
 	// ClientMeasurements is a list of measurements taken by the client.

@@ -9,8 +9,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/m-lab/go/rtx"
 	"github.com/robertodauria/msak/client"
-	"github.com/robertodauria/msak/client/config"
-	"github.com/robertodauria/msak/pkg/ndtm/spec"
 	"go.uber.org/zap"
 )
 
@@ -33,7 +31,22 @@ func main() {
 		zap.L().Sugar().Error("Invalid configuration: please check streams, delay and duration and make sure they make sense.")
 		os.Exit(1)
 	}
-	c := client.NewWithConfig(*flagServer, nil,
-		config.New(config.DialerScheme(*flagScheme), *flagDuration, *flagDelay, *flagCC))
-	c.StartN(context.Background(), spec.SubtestDownload, *flagStreams, uuid.NewString())
+
+	cl := client.New2("msak-client", "")
+	cl.Server = *flagServer
+	cl.CongestionControl = *flagCC
+	cl.NumStreams = *flagStreams
+	cl.Scheme = *flagScheme
+	cl.MeasurementID = uuid.NewString()
+	cl.Length = *flagDuration
+	cl.Delay = *flagDelay
+
+	cl.OutputPath = "clientdata/"
+
+	cl.Download(context.Background())
+	if err != nil {
+		zap.L().Error(err.Error())
+		os.Exit(1)
+	}
+
 }

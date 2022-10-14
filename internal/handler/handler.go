@@ -127,7 +127,7 @@ func (h *Handler) runMeasurement(kind spec.SubtestKind, rw http.ResponseWriter,
 		data.EndTime = time.Now().UTC()
 		h.writeResult(data.UUID, kind, data)
 	}()
-	data.SubType = string(kind)
+	data.SubTest = string(kind)
 	data.CongestionControl = connInfo.CC
 	data.MeasurementID = mid
 

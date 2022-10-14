@@ -2,224 +2,256 @@ package client
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"net/http"
 	"net/url"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/robertodauria/msak/client/config"
-	"github.com/robertodauria/msak/client/emitter"
+	"github.com/m-lab/go/warnonerror"
+	v2 "github.com/m-lab/locate/api/v2"
+	"github.com/m-lab/uuid"
 	"github.com/robertodauria/msak/internal/congestion"
 	"github.com/robertodauria/msak/internal/netx"
+	"github.com/robertodauria/msak/internal/persistence"
 	"github.com/robertodauria/msak/pkg/ndtm"
 	"github.com/robertodauria/msak/pkg/ndtm/results"
 	"github.com/robertodauria/msak/pkg/ndtm/spec"
 	"go.uber.org/zap"
 )
 
-type dialerFunc func(ctx context.Context, url string) (*websocket.Conn, error)
+const (
+	// DefaultWebSocketHandshakeTimeout is the default timeout used by the client
+	// for the WebSocket handshake.
+	DefaultWebSocketHandshakeTimeout = 5 * time.Second
 
-func (c *Client) defaultDialer(ctx context.Context, url string) (*websocket.Conn, error) {
-	c.dialer.ReadBufferSize = spec.MaxMessageSize
-	c.dialer.WriteBufferSize = spec.MaxMessageSize
+	// DefaultStreams is the default number of streams for a new client.
+	DefaultStreams = 5
+
+	libraryName    = "msak-client"
+	libraryVersion = "0.0.1"
+)
+
+type Locator interface {
+	Nearest(ctx context.Context, service string) ([]v2.Target, error)
+}
+
+type NDTMClient struct {
+	ClientName    string
+	ClientVersion string
+
+	Dialer *websocket.Dialer
+
+	Server     string
+	ServiceURL *url.URL
+
+	Locate Locator
+
+	Scheme string
+
+	NumStreams        int
+	Length            time.Duration
+	Delay             time.Duration
+	CongestionControl string
+	MeasurementID     string
+
+	OutputPath    string
+	ResultsByUUID map[string]*results.NDTMResult
+}
+
+// makeUserAgent creates the user agent string
+func makeUserAgent(clientName, clientVersion string) string {
+	return clientName + "/" + clientVersion + " " + libraryName + "/" + libraryVersion
+}
+
+func New2(clientName, clientVersion string) *NDTMClient {
+	return &NDTMClient{
+		ClientName:    clientName,
+		ClientVersion: clientVersion,
+		Dialer: &websocket.Dialer{
+			HandshakeTimeout: DefaultWebSocketHandshakeTimeout,
+		},
+		ResultsByUUID: make(map[string]*results.NDTMResult),
+		Scheme:        "wss",
+	}
+}
+
+func (c *NDTMClient) connect(ctx context.Context, serviceURL *url.URL) (*websocket.Conn, error) {
+	q := serviceURL.Query()
+	q.Set("client_arch", runtime.GOARCH)
+	q.Set("client_library_name", libraryName)
+	q.Set("client_library_version", libraryVersion)
+	q.Set("client_os", runtime.GOOS)
+	q.Set("client_name", c.ClientName)
+	q.Set("client_version", c.ClientVersion)
+	serviceURL.RawQuery = q.Encode()
 	headers := http.Header{}
-	headers.Add("Sec-WebSocket-Protocol", "net.measurementlab.ndt.v7")
-	conn, _, err := c.dialer.DialContext(ctx, url, headers)
+	headers.Add("Sec-WebSocket-Protocol", spec.SecWebSocketProtocol)
+	headers.Add("User-Agent", makeUserAgent(c.ClientName, c.ClientVersion))
+	conn, _, err := c.Dialer.DialContext(ctx, serviceURL.String(), headers)
 	return conn, err
 }
 
-type Client struct {
-	dialer    *websocket.Dialer
-	endpoint  string
-	locateURL *url.URL
-	config    *config.ClientConfig
-	emitter   emitter.Emitter
-
-	startTime      time.Time
-	bytesPerStream []int64
-}
-
-const (
-	DefaultDuration = 10 * time.Second
-	DefaultDelay    = 0
-)
-
-func New(endpoint string) *Client {
-	return NewWithConfig(endpoint, nil, &config.ClientConfig{
-		Scheme:       config.WebSocketSecure,
-		Duration:     DefaultDuration,
-		StreamsDelay: DefaultDelay,
-	})
-}
-
-func NewWithConfig(endpoint string, locateURL *url.URL, conf *config.ClientConfig) *Client {
-	c := &Client{
-		dialer:    websocket.DefaultDialer,
-		endpoint:  endpoint,
-		locateURL: locateURL,
-		config:    conf,
-		emitter:   &emitter.LogEmitter{},
-	}
-	if conf.Scheme == config.WebSocketSecure {
-		c.dialer.TLSClientConfig = &tls.Config{
-			InsecureSkipVerify: conf.NoVerify,
+func (c *NDTMClient) start(ctx context.Context, subtest spec.SubtestKind) error {
+	var mURL *url.URL
+	// If the server has been provided, use it and use default paths based on
+	// the subtest kind (download/upload).
+	if c.Server != "" {
+		path := getPathForSubtest(subtest)
+		mURL = &url.URL{
+			Scheme: c.Scheme,
+			Host:   c.Server,
+			Path:   path,
 		}
+		q := mURL.Query()
+		q.Set("mid", c.MeasurementID)
+		mURL.RawQuery = q.Encode()
 	}
-	return c
-}
 
-func (c *Client) SetEmitter(e emitter.Emitter) {
-	c.emitter = e
-}
+	// TODO: Use Locate for when the server has not been provided.
 
-func (c *Client) measurer(ctx context.Context, streamID int, kind spec.SubtestKind,
-	measurement chan results.Measurement) {
-	// read from the measurement channel, keep track of total bytes
-	// sent/received and total elapsed time, display aggregate goodput.
-	// Stop when the channel is closed by the sender.
-	for m := range measurement {
-		if m.Origin != "receiver" {
-			continue
-		}
-		// update stream bytes and runtime.
-		c.bytesPerStream[streamID] = m.AppInfo.NumBytes
-		zap.L().Sugar().Debugw("measurement", "id", streamID, "NumBytes",
-			m.AppInfo.NumBytes, "goodput", float64(m.AppInfo.NumBytes)/float64(m.AppInfo.ElapsedTime)*8)
-		// aggregate throughput.
-		sum := 0
-		for _, b := range c.bytesPerStream {
-			sum += int(b)
-		}
-		zap.L().Sugar().Infof("aggregate goodput: %f", float64(sum)/float64(time.Since(c.startTime).Seconds())*8/1000000)
+	if mURL == nil {
+		return errors.New("no server provided")
 	}
-}
 
-// StartN starts N streams to run the specified subtest.
-func (c *Client) StartN(ctx context.Context, kind spec.SubtestKind, n int, mid string) {
 	wg := &sync.WaitGroup{}
-	c.bytesPerStream = make([]int64, n)
-	globalTimeout, cancel := context.WithTimeout(ctx, c.config.Duration)
+	globalTimeout, cancel := context.WithTimeout(ctx, c.Length)
 	defer cancel()
-	// set the global startTime for this measurement.
-	c.startTime = time.Now()
-	for i := 0; i < n; i++ {
-		streamID := i
+
+	for i := 0; i < c.NumStreams; i++ {
 		wg.Add(2)
-		// channel to handle measurements from this stream.
 		measurements := make(chan results.Measurement)
+		result := &results.NDTMResult{
+			MeasurementID:      c.MeasurementID,
+			SubTest:            string(subtest),
+			ServerMeasurements: make([]results.Measurement, 0),
+			ClientMeasurements: make([]results.Measurement, 0),
+		}
+
 		go func() {
 			defer wg.Done()
-			c.emitter.OnStart(kind, streamID)
-			err := c.start(globalTimeout, kind, mid, measurements)
+			zap.L().Sugar().Debug("connecting to ", mURL.String())
+			// Connect to mURL.
+			conn, err := c.connect(ctx, mURL)
 			if err != nil {
-				c.emitter.OnError(kind, err)
+				zap.L().Sugar().Error(err)
 				return
 			}
-			c.emitter.OnComplete(kind, streamID)
+			// To store measurement results we use a map associating the
+			// TCP flow's unique identifier to the corresponding results.
+			info, err := getConnInfo(conn)
+			if err != nil {
+				zap.L().Sugar().Error(err)
+				return
+			}
+
+			result.UUID = info.UUID
+			result.CongestionControl = info.CC
+			result.StartTime = time.Now().UTC()
+			c.ResultsByUUID[info.UUID] = result
+
+			switch subtest {
+			case spec.SubtestDownload:
+				err = ndtm.Receiver(globalTimeout, conn, info, measurements)
+			case spec.SubtestUpload:
+				err = ndtm.Sender(globalTimeout, conn, info, measurements)
+			}
+
+			if err != nil {
+				zap.L().Sugar().Error(err)
+			}
+
+			result.EndTime = time.Now().UTC()
 		}()
+
 		go func() {
 			defer wg.Done()
-			c.measurer(ctx, streamID, kind, measurements)
+			c.measurer(result, measurements)
 		}()
-		time.Sleep(c.config.StreamsDelay)
+
+		time.Sleep(c.Delay)
 	}
+
 	wg.Wait()
+
+	// If an output path was specified, write the results as JSON.
+	if c.OutputPath != "" {
+		for uuid, v := range c.ResultsByUUID {
+			c.writeResult(uuid, subtest, v)
+		}
+	}
+
+	return nil
 }
 
-func (r *Client) start(ctx context.Context, subtest spec.SubtestKind,
-	mid string, measurements chan results.Measurement) error {
+func (c *NDTMClient) measurer(result *results.NDTMResult, measurements chan results.Measurement) {
+	for m := range measurements {
+		zap.L().Sugar().Debugw("Measurement received", "origin", m.Origin, "AppInfo", m.AppInfo)
+		switch result.SubTest {
+		case string(spec.SubtestDownload):
+			if m.Origin == "sender" {
+				result.ServerMeasurements = append(result.ServerMeasurements, m)
+			} else {
+				result.ClientMeasurements = append(result.ClientMeasurements, m)
+			}
+		case string(spec.SubtestUpload):
+			if m.Origin == "sender" {
+				result.ClientMeasurements = append(result.ClientMeasurements, m)
+			} else {
+				result.ServerMeasurements = append(result.ServerMeasurements, m)
+			}
+		}
+	}
+}
 
+func (c *NDTMClient) Download(ctx context.Context) {
+	c.start(ctx, spec.SubtestDownload)
+}
+
+func getPathForSubtest(subtest spec.SubtestKind) string {
 	switch subtest {
 	case spec.SubtestDownload:
-		return r.runDownload(ctx, mid, measurements)
+		return spec.DownloadPath
 	case spec.SubtestUpload:
-		return r.runUpload(ctx, mid, measurements)
+		return spec.UploadPath
 	default:
-		return errors.New("invalid subtest")
+		return "invalid"
 	}
 }
 
-func (c *Client) runDownload(ctx context.Context, mid string, measurements chan results.Measurement) error {
-	var conn *websocket.Conn
-	mURL, err := url.Parse(string(c.config.Scheme) + "://" + c.endpoint + spec.DownloadPath)
-	if err != nil {
-		return err
-	}
-	params := mURL.Query()
-	if c.locateURL == nil {
-		params.Add("mid", mid)
-	}
-	params.Add("cc", c.config.CongestionControl)
-	mURL.RawQuery = params.Encode()
-	zap.L().Sugar().Debug("Connecting to ", mURL.String())
-	if conn, err = c.defaultDialer(ctx, mURL.String()); err != nil {
-		close(measurements)
-		return err
-	}
-	// This can (and will, when the OS != Linux) fail. Failure to get the cc
-	// from the socket should not prevent the measurement from starting. The
-	// "CC" field in ConnectionInfo will just be empty in this case.
-	cc, err := getCCFromConn(conn)
-	if err != nil {
-		zap.L().Sugar().Warn("cannot get cc from conn", err)
-	}
-	connInfo := &results.ConnectionInfo{
-		Server: conn.RemoteAddr().String(),
-		Client: conn.LocalAddr().String(),
-		CC:     cc,
-	}
-	if err := ndtm.Receiver(ctx, conn, connInfo, measurements); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (c *Client) runUpload(ctx context.Context, mid string, measurements chan results.Measurement) error {
-	var conn *websocket.Conn
-	mURL, err := url.Parse(string(c.config.Scheme) + "://" + c.endpoint + spec.UploadPath)
-	if err != nil {
-		return err
-	}
-	params := mURL.Query()
-	if c.locateURL == nil {
-		params.Add("mid", mid)
-	}
-	params.Add("cc", c.config.CongestionControl)
-	mURL.RawQuery = params.Encode()
-	if conn, err = c.defaultDialer(ctx, mURL.String()); err != nil {
-		close(measurements)
-		return err
-	}
-	// This can (and will, when the OS != Linux) fail. Failure to get the cc
-	// from the socket should not prevent the measurement from starting. The
-	// "CC" field in ConnectionInfo will just be empty in this case.
-	cc, err := getCCFromConn(conn)
-	if err != nil {
-		zap.L().Sugar().Warn("cannot get cc from conn", err)
-	}
-	connInfo := &results.ConnectionInfo{
-		Server: conn.RemoteAddr().String(),
-		Client: conn.LocalAddr().String(),
-		CC:     cc,
-	}
-	zap.L().Sugar().Debug("ConnectionInfo:", connInfo)
-	if err := ndtm.Sender(ctx, conn, connInfo, measurements); err != nil {
-		return err
-	}
-	return nil
-}
-
-func getCCFromConn(conn *websocket.Conn) (string, error) {
+// Return a ConnectionInfo struct for the given websocket connection.
+func getConnInfo(conn *websocket.Conn) (*results.ConnectionInfo, error) {
 	fp, err := netx.GetFile(conn.UnderlyingConn())
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var cc string
-	if cc, err = congestion.Get(fp); err == nil {
-		return cc, nil
+	cc, err := congestion.Get(fp)
+	if err != nil {
+		return nil, err
 	}
-	return "", err
+	// Get UUID for this TCP flow.
+	uuid, err := uuid.FromFile(fp)
+	if err != nil {
+		return nil, err
+	}
+	return &results.ConnectionInfo{
+		UUID:   uuid,
+		Client: conn.RemoteAddr().String(),
+		Server: conn.RemoteAddr().String(),
+		CC:     cc,
+	}, nil
+}
+
+func (c *NDTMClient) writeResult(uuid string, kind spec.SubtestKind, result *results.NDTMResult) {
+	fp, err := persistence.New(c.OutputPath, string(kind), uuid)
+	if err != nil {
+		zap.L().Sugar().Error("results.NewFile failed", err)
+		return
+	}
+	if err := fp.Write(result); err != nil {
+		zap.L().Sugar().Error("failed to write result", err)
+	}
+	warnonerror.Close(fp, string(kind)+": ignoring fp.Close error")
 }
