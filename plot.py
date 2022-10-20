@@ -58,6 +58,7 @@ def main():
     for k in plot_data:
         x, y = plot_data[k]
         plt.plot(x, y, marker='o', label="flow #{}".format(k))
+        plt.ylabel("Mb/s")
         all_x = np.unique(np.concatenate((all_x, x)))
 
     all_y = []
@@ -66,7 +67,7 @@ def main():
         yi = np.interp(all_x, x, y, left=0, right=0)
         all_y.append(yi)
     
-    plt.plot(all_x, sum(all_y), marker='o', label="aggr. tp")
+    plt.plot(all_x, sum(all_y), marker='o', label="aggregate tput")
     plt.legend()
     plt.ylim(bottom=0)
     plt.show()

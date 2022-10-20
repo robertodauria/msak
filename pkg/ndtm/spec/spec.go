@@ -8,8 +8,8 @@ const (
 	MeasureInterval = 250 * time.Millisecond
 	ScalingFraction = 16
 
-	DownloadPath = "/ndt/v7/download"
-	UploadPath   = "/ndt/v7/upload"
+	DownloadPath = "/msak/ndtm/download"
+	UploadPath   = "/msak/ndtm/upload"
 
 	MaxRuntime = 15 * time.Second
 
