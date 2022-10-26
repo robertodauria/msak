@@ -32,7 +32,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	cl := client.New2("msak-client", "")
+	cl := client.New("msak-client", "")
 	cl.Server = *flagServer
 	cl.CongestionControl = *flagCC
 	cl.NumStreams = *flagStreams

@@ -66,7 +66,7 @@ func makeUserAgent(clientName, clientVersion string) string {
 	return clientName + "/" + clientVersion + " " + libraryName + "/" + libraryVersion
 }
 
-func New2(clientName, clientVersion string) *NDTMClient {
+func New(clientName, clientVersion string) *NDTMClient {
 	return &NDTMClient{
 		ClientName:    clientName,
 		ClientVersion: clientVersion,
@@ -208,6 +208,10 @@ func (c *NDTMClient) measurer(result *results.NDTMResult, measurements chan resu
 
 func (c *NDTMClient) Download(ctx context.Context) {
 	c.start(ctx, spec.SubtestDownload)
+}
+
+func (c *NDTMClient) Upload(ctx context.Context) {
+	c.start(ctx, spec.SubtestUpload)
 }
 
 func getPathForSubtest(subtest spec.SubtestKind) string {
