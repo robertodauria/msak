@@ -12,6 +12,7 @@ import (
 	"github.com/m-lab/access/token"
 	"github.com/m-lab/go/flagx"
 	"github.com/m-lab/go/httpx"
+	"github.com/m-lab/go/prometheusx"
 	"github.com/m-lab/go/rtx"
 	"github.com/robertodauria/msak/internal/handler"
 	"github.com/robertodauria/msak/pkg/ndtm/spec"
@@ -65,6 +66,9 @@ func main() {
 		zap.ReplaceGlobals(logger)
 	}
 
+	promSrv := prometheusx.MustServeMetrics()
+	defer promSrv.Close()
+
 	v, err := token.NewVerifier(tokenVerifyKey.Get()...)
 	if (tokenVerify) && err != nil {
 		rtx.Must(err, "Failed to load verifier")
@@ -99,4 +103,5 @@ func main() {
 	}
 
 	<-ctx.Done()
+	cancel()
 }
