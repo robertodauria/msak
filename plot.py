@@ -5,6 +5,7 @@ import json
 import sys
 import os
 import matplotlib.pyplot as plt
+import matplotlib.ticker as plticker
 import datetime
 import numpy as np
 
@@ -50,12 +51,12 @@ def main():
                 y_values.append(dbytes / dtime * 8)
             previous = m
         plot_data[idx] = (x_values, y_values)
+        plt.plot(x_values, y_values, marker='x', label="Flow ID: ...{}".format(file.get("UUID")[-5:]))
+
 
     all_x = []
     for k in plot_data:
         x, y = plot_data[k]
-        plt.plot(x, y, marker='x', label="flow #{}".format(k))
-        plt.ylabel("Mb/s")
         all_x = np.unique(np.concatenate((all_x, x)))
 
     all_y = []
@@ -64,11 +65,18 @@ def main():
         yi = np.interp(all_x, x, y, left=0, right=0)
         all_y.append(yi)
     
-    plt.plot(all_x, sum(all_y),label="aggregate tput")
-    plt.legend()
+    plt.title("MeasurementID: {}".format(mid))
+    plt.xlabel("Time (s)")
+    plt.ylabel("Throughput (Mb/s)")
+    plt.plot(all_x, sum(all_y),label="aggregate")
+    plt.legend(loc='upper right')
     plt.ylim(bottom=0)
+    
+    ax = plt.subplot(111)
+    loc = plticker.MultipleLocator(base=1)
+    ax.xaxis.set_major_locator(loc)
+    
     plt.show()
     
-
 if __name__ == "__main__":
     main()

@@ -1,44 +1,48 @@
 # Measurements Swiss Army Knife
 
-Prototype client/server implementation of a multi-stream [ndt7](https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md) test.
+Prototype client/server implementation of a multi-stream [ndt7](https://github.com/m-lab/ndt-server/blob/master/spec/ndt7-protocol.md) test ("ndt-m").
 
-The goal is to provide an implementation of ndt7 (client and server) fully compliant with the specification, including optional fields. Then, extend the specification as needed to support measuring the network with multiple TCP flows and aggregate the results.
+In addition to ndt7, msak provides:
 
-The data format is currently compatible with ndt-server (you can use msak-client to measure against ndt-server, even if some advanced features like CC algorithm selection will not work) but there is no guarantee that this won't change in the near future.
+- Multi-stream download and upload throughput measurements
+- Client-side congestion control algorithm selection (cubic or bbr)
+
+The ndt-m data format is not intended to be compatible with ndt7 clients and servers.
 
 ## Running the server
 
 ```bash
-$ go build ./cmd/msak-server
-$ ./msak-server
+go build ./cmd/msak-server
+./msak-server
 ```
 
 This will start listening for incoming connections on port 8080. To listen on a different ip/port, pass `-listen <ip>:<port>`.
 
+To get additional debug output, pass `-debug=true`.
+
 ## Running the client
 
 ```bash
-$ go build ./cmd/msak-client
-$ ./msak-client -server <ip>:<port>
+go build ./cmd/msak-client
+./msak-client
 ```
 
-This will run 3 download measurements with an increasing number of streams (1 to 3).
-
-Command-line arguments:
-
-- `-cc (bbr|cubic)`: request a specific congestion control algorithm from the server. Defaults to 'bbr'.
-- `-streams`: the number of streams to use. If not specified, runs 3 measurements with 1/2/3 streams.
-- `-duration`: duration of the measurement after the last stream has started.
-- `-delay`: delay before starting the next stream.
-- `-output`: output folder prefix
+This will request a server from M-Lab's Locate service and run a download measurement with the default number of streams.
 
 ## Plotting the results
 
-This repository includes a Python3 script to plot the results from one or two msak output folders on a 2x3 grid.
+This repository includes a Python3 script to plot the results of a single measurement (individual TCP flows throughput and aggregate throughput). To install its dependencies:
 
 ```bash
-$ pip3 install -r requirements.txt
-$ python3 plot.py <output_folder_1> <output_folder_2>
+pip3 install -r requirements.txt
+```
+
+To use it: first, when running a measurement with msak-client you must set the `-output` flag so that measurement data is saved somewhere. Then, get `MeasurementID` from any of the output files.
+
+Once you know `MeasurementID`:
+
+```bash
+python3 plot.py <output folder> <measurement ID>
 ```
 
 ![example plot](./plot.png)
