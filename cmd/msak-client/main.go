@@ -19,6 +19,7 @@ var (
 	flagDelay    = flag.Duration("delay", 0, "Delay between each stream")
 	flagDuration = flag.Duration("duration", 10*time.Second, "Length of the last stream")
 	flagScheme   = flag.String("scheme", "ws", "Websocket scheme (wss or ws)")
+	flagOutput   = flag.String("output", "", "Path to write measurement results to")
 )
 
 func main() {
@@ -41,7 +42,7 @@ func main() {
 	cl.Length = *flagDuration
 	cl.Delay = *flagDelay
 
-	cl.OutputPath = "clientdata/"
+	cl.OutputPath = *flagOutput
 
 	cl.Download(context.Background())
 	if err != nil {
