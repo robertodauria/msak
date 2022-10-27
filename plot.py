@@ -37,27 +37,24 @@ def main():
         start_time = parser.parse(file.get("StartTime"))
         start_time_offset = start_time - global_start_time
         print("flow #{} time offset: {} us".format(idx, start_time_offset.microseconds))
-        measurements = file.get("ServerMeasurements")
+        measurements = file.get("ClientMeasurements")
         previous = None
         for m in measurements:
-            elapsed_sec = m.get("TCPInfo").get("ElapsedTime") / 1000000
-            rate_mbps = m.get("TCPInfo").get("BytesAcked") / elapsed_sec / 1000000 * 8
+            elapsed_sec = m.get("AppInfo").get("ElapsedTime") / 1000000
+            rate_mbps = m.get("AppInfo").get("NumBytes") / elapsed_sec / 1000000 * 8
             time = elapsed_sec + start_time_offset.microseconds / 1000000
             if previous is not None:
-                dtime = m.get("TCPInfo").get("ElapsedTime") - previous.get("TCPInfo").get("ElapsedTime")
-                dbytes = m.get("TCPInfo").get("BytesAcked") - previous.get("TCPInfo").get("BytesAcked")
+                dtime = m.get("AppInfo").get("ElapsedTime") - previous.get("AppInfo").get("ElapsedTime")
+                dbytes = m.get("AppInfo").get("NumBytes") - previous.get("AppInfo").get("NumBytes")
                 x_values.append(time)
                 y_values.append(dbytes / dtime * 8)
-                print("flow #{} time: {} bytesacked: {}".format(idx, time, m.get("TCPInfo").get("BytesAcked")))
             previous = m
-
-        print("flow #{} rates: {} {}".format(idx, x_values, y_values))
         plot_data[idx] = (x_values, y_values)
 
     all_x = []
     for k in plot_data:
         x, y = plot_data[k]
-        plt.plot(x, y, marker='o', label="flow #{}".format(k))
+        plt.plot(x, y, marker='x', label="flow #{}".format(k))
         plt.ylabel("Mb/s")
         all_x = np.unique(np.concatenate((all_x, x)))
 
@@ -67,7 +64,7 @@ def main():
         yi = np.interp(all_x, x, y, left=0, right=0)
         all_y.append(yi)
     
-    plt.plot(all_x, sum(all_y), marker='o', label="aggregate tput")
+    plt.plot(all_x, sum(all_y),label="aggregate tput")
     plt.legend()
     plt.ylim(bottom=0)
     plt.show()
