@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.18-alpine
+FROM golang:1.19-alpine AS build
 RUN apk add gcc git linux-headers musl-dev
 WORKDIR /msak
 
@@ -8,9 +8,10 @@ COPY go.sum ./
 RUN go mod download
 
 COPY ./ ./
-
-RUN ls
-
 RUN ./build.sh
+
+FROM alpine
+WORKDIR /msak
+COPY --from=build /msak/msak-server /msak/
 
 ENTRYPOINT ["./msak-server"]
