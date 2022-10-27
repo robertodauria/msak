@@ -13,7 +13,7 @@ import (
 )
 
 var (
-	flagServer   = flag.String("server", "localhost:8080", "Server address")
+	flagServer   = flag.String("server", "", "Server address")
 	flagStreams  = flag.Int("streams", 1, "Number of streams")
 	flagCC       = flag.String("cc", "bbr", "Congestion control algorithm to use")
 	flagDelay    = flag.Duration("delay", 0, "Delay between each stream")

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"runtime"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/m-lab/go/warnonerror"
+	"github.com/m-lab/locate/api/locate"
 	v2 "github.com/m-lab/locate/api/v2"
 	"github.com/m-lab/uuid"
 	"github.com/robertodauria/msak/internal/congestion"
@@ -32,6 +34,11 @@ const (
 
 	libraryName    = "msak-client"
 	libraryVersion = "0.0.1"
+)
+
+var (
+	// ErrNoTargets is returned if all Locate targets have been tried.
+	ErrNoTargets = errors.New("no targets available")
 )
 
 type Locator interface {
@@ -59,6 +66,10 @@ type NDTMClient struct {
 
 	OutputPath    string
 	ResultsByUUID map[string]*results.NDTMResult
+
+	// targets and tIndex cache the results from the Locate API.
+	targets []v2.Target
+	tIndex  map[string]int
 }
 
 // makeUserAgent creates the user agent string
@@ -75,6 +86,10 @@ func New(clientName, clientVersion string) *NDTMClient {
 		},
 		ResultsByUUID: make(map[string]*results.NDTMResult),
 		Scheme:        "wss",
+		Locate: locate.NewClient(
+			makeUserAgent(clientName, clientVersion),
+		),
+		tIndex: map[string]int{},
 	}
 }
 
@@ -94,11 +109,36 @@ func (c *NDTMClient) connect(ctx context.Context, serviceURL *url.URL) (*websock
 	return conn, err
 }
 
+// nextURLFromLocate returns the next URL to try from the Locate API.
+// If it's the first time we're calling this function, it contacts the Locate
+// API. Subsequently, it returns the next URL from the cache.
+// If there are no more URLs to try, it returns an error.
+func (c *NDTMClient) nextURLFromLocate(ctx context.Context, p string) (string, error) {
+	if len(c.targets) == 0 {
+		targets, err := c.Locate.Nearest(ctx, "demo1/ndtm")
+		if err != nil {
+			return "", err
+		}
+		// cache targets on success.
+		c.targets = targets
+	}
+	k := c.Scheme + "://" + p
+	if c.tIndex[k] < len(c.targets) {
+		fmt.Println(c.targets[c.tIndex[k]].URLs)
+		r := c.targets[c.tIndex[k]].URLs[k]
+		c.tIndex[k]++
+		return r, nil
+	}
+	return "", ErrNoTargets
+}
+
 func (c *NDTMClient) start(ctx context.Context, subtest spec.SubtestKind) error {
+	// Find the URL to use for this measurement.
 	var mURL *url.URL
 	// If the server has been provided, use it and use default paths based on
 	// the subtest kind (download/upload).
 	if c.Server != "" {
+		zap.L().Sugar().Info("using server ", c.Server)
 		path := getPathForSubtest(subtest)
 		mURL = &url.URL{
 			Scheme: c.Scheme,
@@ -110,10 +150,26 @@ func (c *NDTMClient) start(ctx context.Context, subtest spec.SubtestKind) error 
 		mURL.RawQuery = q.Encode()
 	}
 
-	// TODO: Use Locate for when the server has not been provided.
+	// If a service URL was provided, use it as-is.
+	if c.ServiceURL != nil {
+		zap.L().Sugar().Info("using service url ", c.ServiceURL.String())
+		// Override scheme to match the provided service url.
+		c.Scheme = c.ServiceURL.Scheme
+		mURL = c.ServiceURL
+	}
 
+	// If no service URL nor server was provided, use the Locate API.
 	if mURL == nil {
-		return errors.New("no server provided")
+		zap.L().Sugar().Info("using locate")
+		urlStr, err := c.nextURLFromLocate(ctx, getPathForSubtest(subtest))
+		if err != nil {
+			return err
+		}
+		mURL, err = url.Parse(urlStr)
+		if err != nil {
+			return err
+		}
+		zap.L().Sugar().Info("URL: ", mURL.String())
 	}
 
 	wg := &sync.WaitGroup{}
@@ -137,6 +193,7 @@ func (c *NDTMClient) start(ctx context.Context, subtest spec.SubtestKind) error 
 			conn, err := c.connect(ctx, mURL)
 			if err != nil {
 				zap.L().Sugar().Error(err)
+				close(measurements)
 				return
 			}
 			// To store measurement results we use a map associating the
@@ -207,11 +264,17 @@ func (c *NDTMClient) measurer(result *results.NDTMResult, measurements chan resu
 }
 
 func (c *NDTMClient) Download(ctx context.Context) {
-	c.start(ctx, spec.SubtestDownload)
+	err := c.start(ctx, spec.SubtestDownload)
+	if err != nil {
+		zap.L().Sugar().Error(err)
+	}
 }
 
 func (c *NDTMClient) Upload(ctx context.Context) {
-	c.start(ctx, spec.SubtestUpload)
+	err := c.start(ctx, spec.SubtestUpload)
+	if err != nil {
+		zap.L().Sugar().Error(err)
+	}
 }
 
 func getPathForSubtest(subtest spec.SubtestKind) string {
