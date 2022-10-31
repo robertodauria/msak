@@ -227,7 +227,7 @@ func sender(wg *sync.WaitGroup, conn *websocket.Conn, connInfo *results.Connecti
 		return
 	}
 
-	appInfo := &results.AppInfo{}
+	numBytes := 0
 
 	start := time.Now()
 	size := spec.MinMessageSize
@@ -247,10 +247,13 @@ func sender(wg *sync.WaitGroup, conn *websocket.Conn, connInfo *results.Connecti
 			return
 		}
 
-		appInfo.NumBytes += int64(size)
+		numBytes += size
 		select {
 		case <-ticker.C:
-			appInfo.ElapsedTime = int64(time.Since(start) / time.Microsecond)
+			appInfo := &results.AppInfo{
+				ElapsedTime: int64(time.Since(start) / time.Microsecond),
+				NumBytes:    int64(numBytes),
+			}
 			tcpInfo, err := tcpinfox.GetTCPInfo(fp)
 			if err != nil {
 				errch <- err
@@ -283,7 +286,7 @@ func sender(wg *sync.WaitGroup, conn *websocket.Conn, connInfo *results.Connecti
 		default:
 			// NOTHING
 		}
-		if int64(size) >= spec.MaxMessageSize || int64(size) >= (appInfo.NumBytes/spec.ScalingFraction) {
+		if int64(size) >= spec.MaxMessageSize || size >= (numBytes/spec.ScalingFraction) {
 			continue
 		}
 		size <<= 1
