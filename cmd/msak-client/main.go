@@ -14,9 +14,9 @@ import (
 
 var (
 	flagServer   = flag.String("server", "", "Server address")
-	flagStreams  = flag.Int("streams", 1, "Number of streams")
+	flagStreams  = flag.Int("streams", 2, "Number of streams")
 	flagCC       = flag.String("cc", "bbr", "Congestion control algorithm to use")
-	flagDelay    = flag.Duration("delay", 0, "Delay between each stream")
+	flagDelay    = flag.Duration("delay", 5*time.Second, "Delay between each stream")
 	flagDuration = flag.Duration("duration", 10*time.Second, "Length of the last stream")
 	flagScheme   = flag.String("scheme", "ws", "Websocket scheme (wss or ws)")
 	flagOutput   = flag.String("output", "", "Path to write measurement results to")
