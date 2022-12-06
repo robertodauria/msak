@@ -115,7 +115,7 @@ func (c *NDTMClient) connect(ctx context.Context, serviceURL *url.URL) (*websock
 // If there are no more URLs to try, it returns an error.
 func (c *NDTMClient) nextURLFromLocate(ctx context.Context, p string) (string, error) {
 	if len(c.targets) == 0 {
-		targets, err := c.Locate.Nearest(ctx, "demo1/ndtm")
+		targets, err := c.Locate.Nearest(ctx, "msak/ndtm")
 		if err != nil {
 			return "", err
 		}
